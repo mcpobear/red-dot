@@ -1,11 +1,18 @@
 // Static game data: nations, great powers, player actions and crisis templates.
 // Pure data + small effect helpers. No DOM access here.
 
+import { syncDet } from './forces.js';
+
 export const clamp = (v, a = 0, b = 100) => Math.max(a, Math.min(b, v));
 const otherPower = (c) => (c === 'US' ? 'CN' : 'US');
 
 export const H = {
-  g: (s, k, d) => { s.g[k] = clamp(s.g[k] + d); },
+  // Deterrence is derived from forces; events nudge a short-lived "posture" that fades each turn.
+  g: (s, k, d) => {
+    if (k === 'det') { s.posture = clamp((s.posture || 0) + d, -40, 40); syncDet(s); }
+    else s.g[k] = clamp(s.g[k] + d);
+  },
+  war: (s, foe, opts) => { if (!s.war && !s.pendingWar) s.pendingWar = { foe, ...opts }; },
   rel: (s, c, d) => { const o = s.nations[c] || s.powers[c]; if (o) o.rel = clamp(o.rel + d); },
   heat: (s, c, d) => { const o = s.nations[c]; if (o) o.heat = clamp(o.heat + d); },
   money: (s, d) => { s.money = Math.max(0, s.money + d); },
@@ -21,20 +28,28 @@ export const INTENTS = {
 // a = bearing from Singapore (deg, clockwise from north), r = radar distance (map units)
 export const NATIONS = {
   MY: { name: 'Malaysia',  a: 0,   r: 14, sz: 6.2, rel: 55, heat: 30, lev: 'Water, the Causeway, shared history',
+        mil: { land: 55, air: 42, sea: 42 },
         bias: { friendly: .30, opportunist: .30, hawkish: .10, distracted: .30 } },
   ID: { name: 'Indonesia', a: 200, r: 16, sz: 6.6, rel: 55, heat: 30, lev: 'Haze, straits and airspace',
+        mil: { land: 85, air: 60, sea: 70 },
         bias: { friendly: .30, opportunist: .30, hawkish: .15, distracted: .25 } },
   BN: { name: 'Brunei',    a: 80,  r: 32, sz: 4.8, rel: 65, heat: 10, lev: 'Quiet, wealthy, steady',
+        mil: { land: 12, air: 10, sea: 10 },
         bias: { friendly: .60, opportunist: .20, hawkish: .05, distracted: .15 } },
   TH: { name: 'Thailand',  a: 325, r: 30, sz: 5.4, rel: 60, heat: 20, lev: 'Land-bridge dreams, shaky politics',
+        mil: { land: 65, air: 55, sea: 45 },
         bias: { friendly: .30, opportunist: .25, hawkish: .10, distracted: .35 } },
   VN: { name: 'Vietnam',   a: 45,  r: 30, sz: 5.4, rel: 55, heat: 25, lev: 'Rising rival hub, South China Sea',
+        mil: { land: 70, air: 50, sea: 50 },
         bias: { friendly: .25, opportunist: .35, hawkish: .20, distracted: .20 } },
   KH: { name: 'Cambodia',  a: 20,  r: 32, sz: 4.8, rel: 50, heat: 25, lev: 'Beijing-leaning, scam compounds',
+        mil: { land: 35, air: 12, sea: 10 },
         bias: { friendly: .25, opportunist: .35, hawkish: .15, distracted: .25 } },
   LA: { name: 'Laos',      a: 350, r: 42, sz: 4.6, rel: 50, heat: 15, lev: 'Hydropower and the regional grid',
+        mil: { land: 28, air: 6, sea: 0 },
         bias: { friendly: .35, opportunist: .25, hawkish: .10, distracted: .30 } },
   MM: { name: 'Myanmar',   a: 300, r: 42, sz: 5.2, rel: 40, heat: 35, lev: 'Instability, refugees, scam hubs',
+        mil: { land: 60, air: 32, sea: 20 },
         bias: { friendly: .15, opportunist: .30, hawkish: .25, distracted: .30 } },
 };
 
@@ -78,12 +93,9 @@ export const ACTIONS = [
     desc: 'Blocks cyber incidents for 4 turns.',
     fx: (s) => { s.shield = 4; } },
 
-  { id: 'modern', cat: 'def', tgt: null, ap: 1, cost: 12, name: 'Modernise Forces',
-    desc: '+9 Deterrence. Hawks and opportunists notice (+2 tension).',
-    fx: (s) => { H.g(s, 'det', 9); for (const n of Object.values(s.nations)) if (hostile(n)) n.heat = clamp(n.heat + 2); } },
   { id: 'drill', cat: 'def', tgt: 'power', ap: 1, cost: 5, name: 'Joint Exercise',
-    desc: '+6 Deterrence, +5 trust with that power (the other cools by 3).',
-    fx: (s, t) => { H.g(s, 'det', 6); H.rel(s, t, 5); H.rel(s, otherPower(t), -3); } },
+    desc: '+8 posture (fades), +5 trust with that power (the other cools by 3).',
+    fx: (s, t) => { H.g(s, 'det', 8); H.rel(s, t, 5); H.rel(s, otherPower(t), -3); } },
   { id: 'signal', cat: 'def', tgt: 'nation', ap: 1, cost: 4, name: 'Show of Force',
     desc: '+3 Deterrence. Cows hawks (−10 tension) but riles the rest (+8, −8 trust).',
     fx: (s, t) => {
@@ -91,6 +103,9 @@ export const ACTIONS = [
       if (hostile(n)) n.heat = clamp(n.heat - 10);
       else { n.heat = clamp(n.heat + 8); H.rel(s, t, -8); }
     } },
+  { id: 'war', cat: 'def', tgt: 'nation', ap: 1, cost: 5, name: 'Go to War',
+    desc: 'Open hostilities. You will see a force comparison first. Neighbours will not forget it.',
+    fx: (s, t) => { H.war(s, t, { aggressor: true, start: 5, reason: 'strike' }); } },
 ];
 
 export const CATS = { dip: 'Diplomacy', eco: 'Economy', int: 'Intel', def: 'Defence' };
@@ -126,6 +141,8 @@ export const CRISES = {
         w: 'They blink first.', l: 'They cut the flow to prove a point.',
         win: (s, c) => { H.rel(s, c.nation, 2); H.heat(s, c.nation, -6); H.g(s, 'hub', 3); },
         lose: (s, c) => { H.g(s, 'res', -12); H.rel(s, c.nation, -10); H.heat(s, c.nation, 12); } },
+      { label: 'Secure the pumping stations', sub: 'Opens a war with Malaysia', ap: 1, cost: 5,
+        fx: (s, c) => { H.war(s, c.nation, { aggressor: true, start: 5, reason: 'supply' }); } },
       { label: 'Accelerate NEWater', sub: 'Long-term answer, +10 Resilience', ap: 1, cost: 12,
         fx: (s, c) => { H.g(s, 'res', 10); H.rel(s, c.nation, -2); H.heat(s, c.nation, -3); } },
       { label: 'Ride it out', sub: 'Free, but supplies suffer', ap: 0, cost: 0, free: true,
@@ -142,6 +159,8 @@ export const CRISES = {
         w: 'They turn away.', l: 'A collision. Both sides blame you.',
         win: (s, c) => { H.heat(s, c.nation, -10); H.g(s, 'det', 3); H.g(s, 'stab', 3); },
         lose: (s, c) => { H.g(s, 'det', -6); H.g(s, 'stab', -6); H.rel(s, c.nation, -8); H.heat(s, c.nation, 10); } },
+      { label: 'Open fire', sub: 'Opens a war', ap: 1, cost: 0,
+        fx: (s, c) => { H.war(s, c.nation, { aggressor: true, start: 5, reason: 'standoff' }); } },
       { label: 'Quiet backchannel', sub: 'Slower if they are hawkish', ap: 1, cost: 2,
         fx: (s, c) => { H.rel(s, c.nation, 4); H.heat(s, c.nation, s.nations[c.nation].intent === 'hawkish' ? -2 : -6); } },
       { label: 'Pull back', sub: 'Free, but it looks weak', ap: 0, cost: 0, free: true,
@@ -302,15 +321,18 @@ export const CRISES = {
     title: (n) => `Ultimatum: ${n}`,
     text: (n) => `${n} demands concessions and moves forces. This is the moment everything hinges on.`,
     erupt: (s, c) => {
-      H.g(s, 'stab', -25); H.g(s, 'res', -18); H.g(s, 'det', -15); H.g(s, 'hub', -10); H.heat(s, c.nation, -20);
-      return 'Forces move while you hesitate. Stability −25, Resilience −18, Deterrence −15, Hub −10.';
+      H.g(s, 'stab', -10); H.g(s, 'hub', -6); H.heat(s, c.nation, -10);
+      H.war(s, c.nation, { aggressor: false, start: -20, reason: 'ultimatum' });
+      return 'Forces move while you hesitate. They strike first. War!';
     },
     options: [
       { label: 'Stand firm', sub: 'Deterrence decides this', ap: 1, cost: 0, brink: true,
         pfn: (s, c) => { const n = s.nations[c.nation]; return 38 + (s.g.det - 50) * 0.6 + (n.rel - 50) * 0.15 - (n.intent === 'hawkish' ? 8 : 0); },
-        w: 'They back down.', l: 'They call the bluff.',
+        w: 'They back down.', l: 'They call the bluff. War!',
         win: (s, c) => { H.heat(s, c.nation, -35); H.g(s, 'det', 5); H.g(s, 'stab', 8); },
-        lose: (s, c) => { H.g(s, 'stab', -25); H.g(s, 'res', -18); H.g(s, 'det', -15); H.g(s, 'hub', -10); H.heat(s, c.nation, -15); } },
+        lose: (s, c) => { H.g(s, 'stab', -10); H.g(s, 'hub', -6); H.heat(s, c.nation, -10); H.war(s, c.nation, { aggressor: false, start: -15, reason: 'ultimatum' }); } },
+      { label: 'Mobilise and fight', sub: 'Meet force with force. Opens a war', ap: 1, cost: 5,
+        fx: (s, c) => { H.war(s, c.nation, { aggressor: false, start: 0, reason: 'ultimatum' }); } },
       { label: 'Rally a great power', sub: 'Phone Washington or Beijing', ap: 1, cost: 5, brink: true,
         pfn: (s) => 40 + (Math.max(s.powers.US.rel, s.powers.CN.rel) - 50) * 0.6,
         w: 'A powerful call cools tempers.', l: 'Nobody picks up in time.',

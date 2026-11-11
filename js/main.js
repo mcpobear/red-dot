@@ -1,6 +1,7 @@
 // UI layer: renders the radar map, HUD, action panel and crisis sheets from engine state.
 import { NATIONS, POWERS, ACTIONS, CRISES, INTENTS, CATS } from './data.js';
 import * as E from './engine.js';
+import { UNITS, unitById, SUPPLIERS, POLITICS_NOTE, DOMAINS, powers, upkeep, detGain } from './forces.js';
 
 const $ = (q, r = document) => r.querySelector(q);
 const $$ = (q, r = document) => [...r.querySelectorAll(q)];
@@ -13,7 +14,7 @@ const store = {
 };
 
 let S = null;
-const ui = { target: null, tab: 'act', cat: 'dip', muted: store.get('muted') === '1', seed: null, mode: 'random' };
+const ui = { target: null, tab: 'act', cat: 'dip', fcat: 'ov', warSnap: null, muted: store.get('muted') === '1', seed: null, mode: 'random' };
 let lastCommit = 0;
 
 // ---------- audio + haptics (best effort) ----------
@@ -130,6 +131,12 @@ function renderHud() {
     <div class="gauges">${gaugeHTML('STAB', g.stab)}${gaugeHTML('DETER', g.det)}${gaugeHTML('HUB', g.hub)}${gaugeHTML('RESIL', g.res)}</div>`;
 }
 
+const approx = (v, known) => (known ? String(Math.round(v)) : '~' + Math.round(v / 5) * 5);
+function milRow(code) {
+  const n = S.nations[code], k = n.scout > 0, me = powers(S);
+  return `<div class="milrow"><span>MIL</span><span>LAND ${approx(n.mil.land, k)}</span><span>AIR ${approx(n.mil.air, k)}</span><span>SEA ${approx(n.mil.sea, k)}</span><em>YOU ${me.land}/${me.air}/${me.sea}</em></div>`;
+}
+
 function targetHTML() {
   const t = ui.target;
   if (!t) return `<div class="t-sub" style="margin:0">Tap a country on the radar to target it. Rings show trust; red glow shows tension. Badges are crisis timers.</div>`;
@@ -141,13 +148,15 @@ function targetHTML() {
     <div class="t-sub">${isN ? NATIONS[t].lev : t === 'US' ? 'Security partner, rival of Beijing' : 'Biggest trading partner, rival of Washington'}${isN && o.scout > 0 ? ` · scouted ${o.scout}t` : ''}</div>
     <div class="bars"><div class="bar"><small><span>TRUST</span><span>${Math.round(o.rel)}</span></small><i style="--v:${o.rel}%"></i></div>
     ${isN ? `<div class="bar heat"><small><span>TENSION</span><span>${Math.round(o.heat)}</span></small><i style="--v:${o.heat}%"></i></div>` : ''}</div>
+    ${isN ? milRow(t) : ''}
     ${cs.map((c) => `<button class="t-crisis" data-a="crisis" data-uid="${c.uid}">${CRISES[c.tpl].icon} ${CRISES[c.tpl].title(ALL[c.nation].name)} · ${c.timer} turn${c.timer > 1 ? 's' : ''} left ›</button>`).join('')}`;
 }
 
 function renderTabs() {
   const n = S.crises.filter((c) => !CRISES[c.tpl].opp).length;
   $('#tabs').innerHTML = `<button class="tab ${ui.tab === 'act' ? 'on' : ''}" data-a="tab" data-tab="act" role="tab">ACTIONS</button>
-    <button class="tab ${ui.tab === 'cri' ? 'on' : ''}" data-a="tab" data-tab="cri" role="tab">CRISES${S.crises.length ? `<em>${S.crises.length}</em>` : ''}</button>`;
+    <button class="tab ${ui.tab === 'cri' ? 'on' : ''}" data-a="tab" data-tab="cri" role="tab">CRISES${S.crises.length ? `<em>${S.crises.length}</em>` : ''}</button>
+    <button class="tab ${ui.tab === 'frc' ? 'on' : ''}" data-a="tab" data-tab="frc" role="tab">FORCES${S.orders.length ? `<em class="blue">${S.orders.length}</em>` : ''}</button>`;
   return n;
 }
 
@@ -176,11 +185,57 @@ function crisesHTML() {
   }).join('');
 }
 
+function forcesHTML() {
+  const cats = [['ov', 'OVERVIEW'], ['land', 'LAND'], ['air', 'AIR'], ['sea', 'SEA']]
+    .map(([k, v]) => `<button class="cat ${ui.fcat === k ? 'on' : ''}" data-a="fcat" data-cat="${k}">${v}</button>`).join('');
+  return `<div class="cats">${cats}</div>${ui.fcat === 'ov' ? overviewHTML() : shopHTML(ui.fcat)}`;
+}
+
+function overviewHTML() {
+  const me = powers(S), net = upkeep(S) - S.baseUpkeep;
+  const bar = (l, v) => `<div class="bar"><small><span>${l}</span><span>${v}</span></small><i style="--v:${Math.min(100, v)}%"></i></div>`;
+  const rows = Object.entries(S.nations).sort((a, b) => (b[1].mil.land + b[1].mil.air + b[1].mil.sea) - (a[1].mil.land + a[1].mil.air + a[1].mil.sea)).map(([c, n]) => {
+    const k = n.scout > 0, cell = (d) => `<td class="${n.mil[d] > me[d] ? 'over' : ''}">${approx(n.mil[d], k)}</td>`;
+    return `<tr data-a="pick" data-code="${c}"><td><b>${c}</b> ${NATIONS[c].name}</td>${cell('land')}${cell('air')}${cell('sea')}</tr>`;
+  }).join('');
+  const inbound = S.orders.map((o) => `<li class="income">${unitById[o.unit].name} · ${o.turns} turn${o.turns > 1 ? 's' : ''}</li>`).join('');
+  const owned = Object.entries(S.forces).filter(([, n]) => n > 0).sort((a, b) => unitById[a[0]].dom.localeCompare(unitById[b[0]].dom))
+    .map(([id, n]) => `<li><b>${n}×</b> ${unitById[id].name} <small>${unitById[id].sup}</small></li>`).join('');
+  return `<div class="bars3">${bar('LAND', me.land)}${bar('AIR', me.air)}${bar('SEA', me.sea)}</div>
+    <p class="fine">Deterrence <b>${S.g.det}</b> = forces − arms race (${Math.round(S.arms)}) ${S.posture ? `${S.posture > 0 ? '+' : '−'} posture ${Math.abs(S.posture)}` : ''}<br>
+    Upkeep <b>${net >= 0 ? '+' : '−'}$${Math.abs(net).toFixed(1)}B/turn</b> beyond your starting forces · Orders <b>${S.ordersThisTurn}/${E.ORDERS_PER_TURN}</b> this turn</p>
+    ${inbound ? `<h4>In transit</h4><ul class="list">${inbound}</ul>` : ''}
+    <h4>Regional balance</h4>
+    <table class="mil"><tr><th></th><th>LAND</th><th>AIR</th><th>SEA</th></tr><tr class="me"><td><b>SG</b> You</td><td>${me.land}</td><td>${me.air}</td><td>${me.sea}</td></tr>${rows}</table>
+    <p class="fine">Red = they out-muscle you in that arm. Scout a nation for exact figures.</p>
+    <h4>Your order of battle</h4><ul class="oob">${owned}</ul>`;
+}
+
+function shopHTML(dom) {
+  const list = UNITS.filter((u) => u.dom === dom).sort((a, b) => a.tier - b.tier || a.cost - b.cost);
+  return `<p class="fine">${DOMAINS[dom]} power ${powers(S)[dom]} · ${S.ordersThisTurn}/${E.ORDERS_PER_TURN} orders used · $${S.money}B</p>` + list.map((u) => {
+    const st = E.unitState(S, u), own = S.forces[u.id] || 0, inb = S.orders.filter((o) => o.unit === u.id).length;
+    return `<button class="act unit ${st.ok ? '' : 'locked'}" data-a="unit" data-id="${u.id}">
+      <b>${u.name}</b><div class="chips"><em class="sup">${u.sup}</em><em class="money">$${u.cost}B</em></div>
+      <span>+${u.pw} ${DOMAINS[dom]} · T${u.tier}${own ? ` · own ${own}` : ''}${inb ? ` · +${inb} inbound` : ''}${st.ok ? '' : ` · <i class="why">${st.reason}</i>`}</span></button>`;
+  }).join('');
+}
+
+function orderSheet(id) {
+  const u = unitById[id], st = E.unitState(S, u), own = S.forces[id] || 0;
+  const ico = { land: '🪖', air: '✈️', sea: '⚓' }[u.dom];
+  sheet(`<div class="s-head"><span class="ico">${ico}</span><div><h2>${u.name}</h2><div class="meta">${SUPPLIERS[u.sup].name.toUpperCase()} · TIER ${u.tier} · OWN ${own}</div></div></div>
+    <div class="chiprow"><span class="chip g">+${u.pw} ${DOMAINS[u.dom]} power</span><span class="chip g">Deterrence ≈ +${detGain(u)}</span><span class="chip b">$${u.cost}B</span><span class="chip b">Upkeep $${u.up}B/turn</span><span class="chip">Delivery ${u.delay} turns</span></div>
+    ${POLITICS_NOTE[u.sup] ? `<p class="s-text">Supplier politics: ${POLITICS_NOTE[u.sup]}.</p>` : ''}
+    ${st.ok ? '' : `<p class="s-text why-box">${st.reason}</p>`}
+    <div class="row2"><button class="btn alt" data-a="close">Cancel</button><button class="btn" data-a="order" data-id="${id}" ${st.ok ? '' : 'disabled'}>Order · $${u.cost}B</button></div>`);
+}
+
 function renderPanel() {
   renderTabs();
   $('#target').innerHTML = targetHTML();
   const body = $('#body'), top = body.scrollTop;
-  body.innerHTML = ui.tab === 'act' ? actionsHTML() : crisesHTML();
+  body.innerHTML = ui.tab === 'act' ? actionsHTML() : ui.tab === 'cri' ? crisesHTML() : forcesHTML();
   body.scrollTop = top;
 }
 
@@ -232,6 +287,8 @@ function howSheet(back) {
       <li><b>3 action points a turn.</b> Tap a node on the radar to target it, then pick an action. Everything costs AP and usually money.</li>
       <li><b>Crises tick down.</b> The badge on the map is the timer. Ignore one and it erupts. Open the Crises tab to respond.</li>
       <li><b>Gambles need nerve.</b> Risky options show odds and must be held to commit. Scout a nation to reveal its hidden intent and exact odds.</li>
+      <li><b>Build your forces.</b> The Forces tab lists real-world equipment from many suppliers. Buy from the same supplier to unlock better kit, and mind the politics. Deterrence comes from your forces and decays as the region arms.</li>
+      <li><b>You can fight.</b> Cut water, failed ultimatums and open attacks lead to war. Win the air, hold the Strait, then press the land, or seek a ceasefire.</li>
       <li><b>Balance the giants.</b> Leaning too hard on Washington or Beijing wins you gifts and costs you stability.</li>
     </ol><button class="btn" data-a="${back === 'title' ? 'title' : back === 'brief' ? 'brief' : 'close'}">${back === 'title' ? 'Back' : back === 'brief' ? 'Got it — show briefing' : 'Got it'}</button>`);
 }
@@ -250,7 +307,7 @@ function reportSheet(title, events, created, chips, icon = '📋') {
     ...created.map((c) => `<li class="new">${CRISES[c.tpl].icon} <b>${CRISES[c.tpl].title(ALL[c.nation].name)}</b> · ${c.nation} · ${c.timer} turn${c.timer > 1 ? 's' : ''}</li>`),
   ].join('');
   sheet(`<div class="s-head"><span class="ico">${icon}</span><div><h2>${title}</h2><div class="meta">${S.crises.length} ACTIVE CRISES</div></div></div>
-    <ul class="list">${lines}</ul><div class="chiprow">${chipsHTML(chips)}</div><button class="btn" data-a="close">Continue</button>`);
+    <ul class="list">${lines}</ul><div class="chiprow">${chipsHTML(chips)}</div><button class="btn" data-a="after">Continue</button>`);
 }
 
 function crisisSheet(uid) {
@@ -282,7 +339,7 @@ function commitOpt(uid, i) {
   if (S.over) { showOver(); return; }
   sheet(`<div class="res-head ${r.kind}">${head}</div><p class="s-text"><b>${r.label}.</b> ${r.text || ''}</p>
     <div class="chiprow">${chipsHTML(chips) || '<span class="chip">No change</span>'}</div>
-    <button class="btn" data-a="close">Continue</button>`);
+    <button class="btn" data-a="after">Continue</button>`);
 }
 
 // ---------- turn flow ----------
@@ -357,16 +414,32 @@ const handlers = {
   restart: () => { closeSheet(); titleSheet(); },
   share: () => shareResult(),
   tab: (el) => { ui.tab = el.dataset.tab; renderPanel(); },
+  fcat: (el) => { ui.fcat = el.dataset.cat; renderPanel(); },
+  pick: (el) => { ui.target = el.dataset.code; render(); },
+  unit: (el) => { sfx.tap(); orderSheet(el.dataset.id); },
+  order: (el) => {
+    const before = E.snapshot(S);
+    const r = E.buyUnit(S, el.dataset.id);
+    if (!r.ok) { sfx.bad(); return; }
+    sfx.ok(); haptic(15); closeSheet();
+    toast([{ label: 'Ordered ' + unitById[el.dataset.id].name, d: 0, good: true }, ...E.diff(before, E.snapshot(S))].slice(0, 6));
+    render();
+  },
+  after: () => { closeSheet(); warCheck(); },
+  wop: (el) => warOp(el.dataset.id),
+  warcont: () => { closeSheet(); if (S.over) showOver(); else warCheck(); },
+  warGo: (el) => { closeSheet(); handlers.do({ dataset: { id: 'war', force: '1' } }); },
   cat: (el) => { ui.cat = el.dataset.cat; renderPanel(); },
   do: (el) => {
     const id = el.dataset.id;
+    if (id === 'war' && !el.dataset.force) { confirmWar(); return; }
     const before = E.snapshot(S);
     const r = E.doAction(S, id, ui.target);
     if (!r.ok) { sfx.bad(); return; }
     sfx.tap(); haptic(10);
     toast(E.diff(before, E.snapshot(S)));
     render();
-    if (S.over) showOver();
+    if (S.over) showOver(); else warCheck();
   },
   crisis: (el) => { sfx.tap(); crisisSheet(Number(el.dataset.uid)); },
   opt: (el, e) => {
@@ -400,6 +473,65 @@ document.addEventListener('pointerdown', (e) => {
 const cancelHold = () => { if (hold) { clearTimeout(hold.t); hold.b.classList.remove('holding'); hold = null; } };
 ['pointerup', 'pointercancel', 'pointerleave'].forEach((ev) => document.addEventListener(ev, cancelHold, true));
 document.addEventListener('contextmenu', (e) => e.preventDefault());
+
+// ---------- war ----------
+const WAR_REASON = {
+  supply: 'Your supply lines are cut. Restore them or fall.',
+  attack: 'Tensions boiled over into open attack.',
+  ultimatum: 'The ultimatum has run out. Force decides this now.',
+  standoff: 'Shots have been fired at sea.',
+  strike: 'You chose war.',
+};
+
+function warCheck() {
+  if (S.over) return false;
+  if (S.war) { if (!ui.warSnap) ui.warSnap = E.snapshot(S); render(); warSheet(); return true; }
+  ui.warSnap = null;
+  return false;
+}
+
+function confirmWar() {
+  const t = ui.target;
+  if (!t || !S.nations[t]) { sfx.bad(); return; }
+  const n = S.nations[t], me = powers(S), k = n.scout > 0;
+  const row = (l, a, b) => `<tr><td>${l}</td><td>${a}</td><td class="${b > a ? 'over' : ''}">${approx(b, k)}</td></tr>`;
+  sheet(`<div class="s-head"><span class="ico">⚔️</span><div><h2>War with ${NATIONS[t].name}?</h2><div class="meta">THIS CANNOT BE UNDONE</div></div></div>
+    <table class="mil"><tr><th></th><th>YOU</th><th>THEM</th></tr>${row('Land', me.land, n.mil.land)}${row('Air', me.air, n.mil.air)}${row('Sea', me.sea, n.mil.sea)}</table>
+    <p class="s-text">Wars drain Stability and Hub every round and cost you equipment. Win and the neighbour is humbled, but the rest of the region will not forget who started it.${k ? '' : ' Scout them for exact figures.'}</p>
+    <div class="row2"><button class="btn alt" data-a="close">Stand down</button><button class="btn red" data-a="warGo">Declare war</button></div>`);
+}
+
+function warSheet(extra) {
+  const w = S.war, f = S.nations[w.foe], me = powers(S), opts = E.warOptions(S);
+  const vs = (l, a, b) => `<div class="vs"><span>${l}</span><div class="vsbars"><i class="me" style="--v:${Math.min(100, a)}%"></i><i class="foe" style="--v:${Math.min(100, b)}%"></i></div><b>${Math.round(a)}<small> v </small>${Math.round(b)}</b></div>`;
+  const pos = (w.score + 100) / 2;
+  sheet(`<div class="s-head"><span class="ico">⚔️</span><div><h2>War: ${NATIONS[w.foe].name}</h2><div class="meta">ROUND ${Math.min(w.round, E.MAX_WAR_ROUNDS)}/${E.MAX_WAR_ROUNDS} · $${S.money}B · STAB ${S.g.stab}</div></div></div>
+    ${w.round === 1 ? `<p class="s-text">${WAR_REASON[w.reason] || ''}</p>` : ''}
+    <div class="wmeter" aria-label="War score"><span class="lo">DEFEAT</span><div><u></u><i style="left:${pos}%"></i></div><span class="hi">VICTORY</span></div>
+    <div class="vsbox">${vs('LAND', me.land, f.mil.land)}${vs('AIR', me.air, f.mil.air)}${vs('SEA', me.sea, f.mil.sea)}</div>
+    <div class="chiprow"><span class="chip ${w.airSup ? 'g' : ''}">Air superiority L${w.airSup}</span><span class="chip ${w.seaCtl ? 'g' : ''}">Sea control L${w.seaCtl}</span></div>
+    ${w.log.length ? `<ul class="list">${w.log.map((l) => `<li class="${/Lost|strikes your|run dry|goes badly|stalls|bogs|refuses|intercepted/.test(l) ? 'erupt' : 'income'}">${l}</li>`).join('')}</ul>` : ''}
+    ${opts.map((o) => `<button class="opt ${o.id === 'ceasefire' ? 'peace' : ''}" data-a="wop" data-id="${o.id}" ${o.ok ? '' : 'disabled'}>
+      <b>${o.name}</b><div class="chips"><em class="${o.p >= 65 ? 'g' : o.p < 45 ? 'r' : ''}">${o.label} · ${o.p}%</em>${o.cost ? `<em class="money">$${o.cost}B</em>` : ''}</div>
+      <span>${o.desc}</span>${o.ok ? '' : `<span class="why">${o.reason}</span>`}</button>`).join('')}`, { dismiss: false });
+}
+
+function warOp(id) {
+  const w = S.war, before = E.snapshot(S);
+  const r = E.warOp(S, id);
+  if (!r.ok) { sfx.bad(); return; }
+  const lostBad = r.lines.some((l) => /Lost|strikes your/.test(l));
+  lostBad ? (sfx.bad(), haptic([30, 30]), shake('bad')) : (sfx.ok(), haptic(15));
+  render();
+  if (!r.ended) { warSheet(); return; }
+  const snap = ui.warSnap || before; ui.warSnap = null;
+  const chips = E.diff(snap, E.snapshot(S));
+  const e = r.ended, good = e.kind === 'victory' || /Favourable/.test(e.title);
+  const lost = w.lost.length ? `<h4>Losses</h4><ul class="list">${w.lost.map((n) => `<li class="erupt">${n}</li>`).join('')}</ul>` : '';
+  sheet(`<div class="res-head ${good ? 'win' : e.kind === 'defeat' ? 'lose' : 'safe'}">${e.title.toUpperCase()}</div>
+    <p class="s-text">${e.text}</p><ul class="list">${r.lines.map((l) => `<li>${l}</li>`).join('')}</ul>${lost}
+    <div class="chiprow">${chipsHTML(chips)}</div><button class="btn" data-a="warcont">${S.over ? 'See result' : 'Back to government'}</button>`, { dismiss: false });
+}
 
 // ---------- boot ----------
 buildMap();

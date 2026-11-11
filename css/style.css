@@ -192,3 +192,36 @@ h2, h3, p { margin: 0; }
 .shake { animation: shake .4s; } @keyframes shake { 20% { transform: translateX(-6px); } 40% { transform: translateX(6px); } 60% { transform: translateX(-4px); } 80% { transform: translateX(3px); } }
 .flash { animation: flash .5s; } @keyframes flash { 0% { box-shadow: inset 0 0 0 100vmax rgba(255,77,94,.25); } }
 @media (prefers-reduced-motion: reduce) { *, *::before, *::after { animation: none !important; transition: none !important; } }
+
+/* ---------- Forces + war ---------- */
+.tab em.blue { background: var(--blue); color: #04121f; }
+.milrow { display: flex; flex-wrap: wrap; gap: 4px 10px; margin-top: 6px; font: 600 10px var(--mono); letter-spacing: .05em; color: var(--muted); }
+.milrow span:first-child { color: var(--text); }
+.milrow em { font-style: normal; margin-left: auto; color: var(--teal); }
+h4 { margin: 14px 0 6px; font: 700 11px var(--mono); letter-spacing: .12em; color: var(--muted); }
+.fine { margin: 2px 0 10px; font-size: 12px; color: var(--muted); line-height: 1.45; } .fine b { color: var(--text); }
+.bars3 { display: grid; grid-template-columns: repeat(3, 1fr); gap: 10px; margin-bottom: 8px; }
+.bars3 .bar i::after { background: var(--blue); }
+table.mil { width: 100%; border-collapse: collapse; font: 600 12px var(--mono); margin: 4px 0 6px; }
+table.mil th { text-align: right; color: var(--muted); font-size: 10px; letter-spacing: .1em; padding: 2px 4px; }
+table.mil td { text-align: right; padding: 7px 4px; border-bottom: 1px solid #16385a; }
+table.mil td:first-child { text-align: left; } table.mil tr[data-a] { cursor: pointer; }
+table.mil td.over { color: var(--red); } table.mil tr.me td { color: var(--teal); }
+.oob { margin: 0 0 6px; padding: 0; list-style: none; columns: 1; }
+.oob li { padding: 5px 0; border-bottom: 1px solid #16385a; font-size: 13px; } .oob small { color: var(--muted); font: 600 10px var(--mono); float: right; }
+.act.unit.locked { opacity: .62; }
+.chips em.sup { color: var(--blue); } .chips em.g { color: var(--teal); } .chips em.r { color: var(--red); }
+.why-box { color: var(--amber); font-weight: 600; }
+.vsbox { margin: 6px 0 4px; }
+.vs { display: grid; grid-template-columns: 44px 1fr 74px; align-items: center; gap: 8px; font: 700 11px var(--mono); color: var(--muted); margin-bottom: 7px; }
+.vs b { color: var(--text); text-align: right; font-size: 12px; } .vs small { color: var(--muted); font-weight: 500; }
+.vsbars { display: grid; gap: 3px; }
+.vsbars i { display: block; height: 5px; border-radius: 3px; background: #0f2744; position: relative; overflow: hidden; }
+.vsbars i::after { content: ""; position: absolute; inset: 0 auto 0 0; width: var(--v); border-radius: 3px; }
+.vsbars i.me::after { background: var(--teal); } .vsbars i.foe::after { background: var(--red); }
+.wmeter { display: grid; grid-template-columns: auto 1fr auto; gap: 8px; align-items: center; font: 700 10px var(--mono); letter-spacing: .08em; margin: 6px 0 10px; }
+.wmeter .lo { color: var(--red); } .wmeter .hi { color: var(--teal); }
+.wmeter div { position: relative; height: 10px; border-radius: 5px; background: linear-gradient(90deg, rgba(255,77,94,.55), #12304e 50%, rgba(46,230,201,.55)); }
+.wmeter u { position: absolute; left: 50%; top: -2px; bottom: -2px; width: 1px; background: #7f9bb8; }
+.wmeter i { position: absolute; top: -4px; width: 6px; height: 18px; margin-left: -3px; border-radius: 3px; background: #fff; box-shadow: 0 0 8px #fff; transition: left .5s; }
+.opt.peace { border-color: rgba(90,169,255,.5); }
