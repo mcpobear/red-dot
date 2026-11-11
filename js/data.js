@@ -10,7 +10,7 @@ export const H = {
   // Deterrence is derived from forces; events nudge a short-lived "posture" that fades each turn.
   g: (s, k, d) => {
     if (k === 'det') { s.posture = clamp((s.posture || 0) + d, -40, 40); syncDet(s); }
-    else s.g[k] = clamp(s.g[k] + d);
+    else { if (k === 'stab' && d < 0) d = Math.min(-1, Math.round(d * 0.8)); s.g[k] = clamp(s.g[k] + d); }
   },
   war: (s, foe, opts) => { if (!s.war && !s.pendingWar) s.pendingWar = { foe, ...opts }; },
   rel: (s, c, d) => { const o = s.nations[c] || s.powers[c]; if (o) o.rel = clamp(o.rel + d); },
@@ -58,6 +58,38 @@ export const POWERS = {
   CN: { name: 'Beijing',    a: 25,  r: 52, sz: 5.2 },
 };
 
+
+// Fictional leaders. Each has a style that quietly changes how your actions land.
+export const STYLES = {
+  charmer:   { label: 'Charmer',   note: 'State Visits land harder (+4 trust).' },
+  dealer:    { label: 'Dealmaker', note: 'Trade Pacts pay more (+4 Hub).' },
+  hardliner: { label: 'Hardliner', note: 'Respects strength: Show of Force cows them more, but visits warm them less.' },
+  proud:     { label: 'Proud',     note: 'Touchy about face: Show of Force costs you extra trust.' },
+};
+export const LEADERS = {
+  MY: { name: 'PM Idris Karim',        style: 'dealer',    quip: 'Never met a deal he did not want a cut of.' },
+  ID: { name: 'President Wiratama',    style: 'charmer',   quip: 'Loves a summit, a handshake and a photo.' },
+  BN: { name: 'Sultan Omar',           style: 'dealer',    quip: 'Patient, wealthy, allergic to drama.' },
+  TH: { name: 'PM Rattanakul',         style: 'charmer',   quip: 'Smiles first, decides later.' },
+  VN: { name: 'Gen. Sec. Hoang',       style: 'hardliner', quip: 'Counts your ships before he counts your words.' },
+  KH: { name: 'PM Sokha',              style: 'proud',     quip: 'Leans toward Beijing and hates being reminded.' },
+  LA: { name: 'President Keomany',     style: 'dealer',    quip: 'Wants power lines, not problems.' },
+  MM: { name: 'Gen. Min Thura',        style: 'hardliner', quip: 'Rules by the barrel and trusts nobody.' },
+};
+export const leaderName = (c) => (LEADERS[c] ? LEADERS[c].name : '');
+
+// Called after an action resolves. Returns a short note if the leader's style mattered.
+export function leaderBonus(s, id, t) {
+  const L = LEADERS[t]; if (!L || !s.nations[t]) return '';
+  const st = L.style;
+  if (id === 'visit' && st === 'charmer') { H.rel(s, t, 4); return `${L.name} loves the pageantry: +4 trust`; }
+  if (id === 'visit' && st === 'hardliner') { H.rel(s, t, -3); return `${L.name} is unmoved by ceremony: −3 trust`; }
+  if (id === 'trade' && st === 'dealer') { H.g(s, 'hub', 4); return `${L.name} sweetens the deal: +4 Hub`; }
+  if (id === 'signal' && st === 'hardliner') { s.nations[t].heat = clamp(s.nations[t].heat - 6); return `${L.name} respects strength: −6 tension`; }
+  if (id === 'signal' && st === 'proud') { H.rel(s, t, -6); return `${L.name} takes it personally: −6 trust`; }
+  return '';
+}
+
 const hostile = (n) => n.intent === 'hawkish' || n.intent === 'opportunist';
 
 // cat: dip | eco | int | def.  tgt: nation | power | any | null
@@ -86,9 +118,9 @@ export const ACTIONS = [
     desc: '+8 Stability. Vouchers and rebates.',
     fx: (s) => { H.g(s, 'stab', 8); } },
 
-  { id: 'scout', cat: 'int', tgt: 'nation', ap: 1, cost: 3, name: 'Scout Intentions',
-    desc: 'Reveals hidden intent and exact odds against this nation for 4 turns.',
-    fx: (s, t) => { s.nations[t].scout = 4; } },
+  { id: 'scout', cat: 'int', tgt: 'nation', ap: 1, cost: 1, name: 'Scout Intentions',
+    desc: 'Reveals hidden intent and exact odds against this nation for 6 turns.',
+    fx: (s, t) => { s.nations[t].scout = 6; } },
   { id: 'counter', cat: 'int', tgt: null, ap: 1, cost: 4, name: 'Counter-Espionage',
     desc: 'Blocks cyber incidents for 4 turns.',
     fx: (s) => { s.shield = 4; } },
@@ -340,6 +372,42 @@ export const CRISES = {
         lose: (s, c) => { H.heat(s, c.nation, -5); H.g(s, 'stab', -10); } },
       { label: 'Concede quietly', sub: 'Painful, but it is over', ap: 1, cost: 0,
         fx: (s, c) => { H.g(s, 'stab', -14); H.g(s, 'hub', -8); H.heat(s, c.nation, -25); H.rel(s, c.nation, 5); } },
+    ],
+  },
+
+  call_favor: {
+    icon: '📞', opp: true, call: true, nations: ['MY', 'ID', 'BN', 'TH', 'VN', 'KH', 'LA', 'MM'], w: 2, timer: 1,
+    title: (n) => `Late Call from ${n}`,
+    text: (n, c) => `Your phone buzzes past midnight. It is ${leaderName(c.nation)}, friendly but wanting something: public backing in a regional spat.`,
+    erupt: () => 'The call goes to voicemail. They do not call back.',
+    options: [
+      { label: 'Back them publicly', sub: '+8 trust, but others notice (+3 tension elsewhere)', ap: 1, cost: 0,
+        fx: (s, c) => { H.rel(s, c.nation, 8); for (const k of Object.keys(s.nations)) if (k !== c.nation) H.heat(s, k, 3); } },
+      { label: 'Decline politely', sub: '−2 trust', ap: 0, cost: 0, free: true, fx: (s, c) => { H.rel(s, c.nation, -2); } },
+    ],
+  },
+  call_tip: {
+    icon: '🕵️', opp: true, call: true, nations: ['MY', 'ID', 'TH', 'VN', 'KH', 'MM'], w: 2, timer: 1,
+    title: (n) => `Quiet Word from ${n}`,
+    text: (n, c) => `${leaderName(c.nation)} lets something slip over a secure line: a hint of what they really intend. You could press for more.`,
+    erupt: () => 'The line goes dead.',
+    options: [
+      { label: 'Press for the details', sub: 'Free scout for 4 turns, +2 trust', ap: 1, cost: 0,
+        fx: (s, c) => { s.nations[c.nation].scout = Math.max(s.nations[c.nation].scout, 4); H.rel(s, c.nation, 2); } },
+      { label: 'Let it lie', sub: 'Nothing happens', ap: 0, cost: 0, free: true, fx: () => {} },
+    ],
+  },
+  call_warning: {
+    icon: '☎️', call: true, nations: ['MY', 'ID', 'VN', 'MM', 'KH'], w: 2, timer: 1,
+    title: (n) => `Warning Call from ${n}`,
+    text: (n, c) => `${leaderName(c.nation)} is on the line and not smiling. Patience is "running thin". Say the right thing, or the temperature rises.`,
+    erupt: (s, c) => { H.heat(s, c.nation, 6); H.g(s, 'stab', -2); return 'Silence reads as weakness. Tension +6, Stability −2.'; },
+    options: [
+      { label: 'Reassure them', sub: 'A gamble. Win: tension −15. Lose: +5', ap: 1, cost: 0, brink: true,
+        w: 'The tone softens.', l: 'They hear weakness.',
+        win: (s, c) => { H.heat(s, c.nation, -15); }, lose: (s, c) => { H.heat(s, c.nation, 5); } },
+      { label: 'Hold the line', sub: '+3 Deterrence posture, +4 tension', ap: 1, cost: 0,
+        fx: (s, c) => { H.g(s, 'det', 3); H.heat(s, c.nation, 4); } },
     ],
   },
   opp_trade: {

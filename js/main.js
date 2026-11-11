@@ -1,6 +1,7 @@
 // UI layer: renders the radar map, HUD, action panel and crisis sheets from engine state.
-import { NATIONS, POWERS, ACTIONS, CRISES, INTENTS, CATS } from './data.js';
+import { NATIONS, POWERS, ACTIONS, CRISES, INTENTS, CATS, LEADERS, STYLES } from './data.js';
 import * as E from './engine.js';
+import { sfx, music } from './audio.js';
 import { UNITS, unitById, SUPPLIERS, POLITICS_NOTE, DOMAINS, powers, upkeep, detGain } from './forces.js';
 
 const $ = (q, r = document) => r.querySelector(q);
@@ -14,32 +15,15 @@ const store = {
 };
 
 let S = null;
-const ui = { target: null, tab: 'act', cat: 'dip', fcat: 'ov', warSnap: null, muted: store.get('muted') === '1', seed: null, mode: 'random' };
+const ui = { target: null, tab: 'act', cat: 'dip', fcat: 'ov', warSnap: null, seed: null, mode: 'random' };
 let lastCommit = 0;
 
 // ---------- audio + haptics (best effort) ----------
-let AC = null;
-function tone(f, d = 0.08, type = 'sine', v = 0.05, when = 0) {
-  if (ui.muted) return;
-  try {
-    AC = AC || new (window.AudioContext || window.webkitAudioContext)();
-    if (AC.state === 'suspended') AC.resume();
-    const t = AC.currentTime + when, o = AC.createOscillator(), g = AC.createGain();
-    o.type = type; o.frequency.value = f;
-    g.gain.setValueAtTime(v, t); g.gain.exponentialRampToValueAtTime(0.0001, t + d);
-    o.connect(g); g.connect(AC.destination); o.start(t); o.stop(t + d + 0.02);
-  } catch { /* no audio */ }
-}
-const sfx = {
-  tap: () => tone(660, 0.05, 'triangle'),
-  ok: () => { tone(520, 0.1, 'triangle'); tone(780, 0.16, 'triangle', 0.05, 0.09); },
-  bad: () => { tone(150, 0.3, 'sawtooth', 0.05); tone(110, 0.3, 'sawtooth', 0.04, 0.12); },
-  alert: () => { tone(880, 0.07, 'square', 0.025); tone(880, 0.07, 'square', 0.025, 0.14); },
-  turn: () => tone(330, 0.14, 'sine'),
-};
+store.get('sfx') === '0' && music.setSfx(false);
+store.get('music') === '0' && music.setMusic(false);
 let hapticLabel = null;
 function haptic(ms = 10) {
-  if (ui.muted) return;
+  if (!music.sfxOn) return;
   if (navigator.vibrate) { try { navigator.vibrate(ms); } catch { /* ignore */ } return; }
   try { // iOS Safari: toggling a switch checkbox gives a light tap
     if (!hapticLabel) {
@@ -137,6 +121,11 @@ function milRow(code) {
   return `<div class="milrow"><span>MIL</span><span>LAND ${approx(n.mil.land, k)}</span><span>AIR ${approx(n.mil.air, k)}</span><span>SEA ${approx(n.mil.sea, k)}</span><em>YOU ${me.land}/${me.air}/${me.sea}</em></div>`;
 }
 
+function leaderRow(code) {
+  const L = LEADERS[code], st = STYLES[L.style];
+  return `<div class="leader"><b>${L.name}</b><span class="tag">${st.label.toUpperCase()}</span><div class="t-sub" style="margin:2px 0 0">${L.quip} ${st.note}</div></div>`;
+}
+
 function targetHTML() {
   const t = ui.target;
   if (!t) return `<div class="t-sub" style="margin:0">Tap a country on the radar to target it. Rings show trust; red glow shows tension. Badges are crisis timers.</div>`;
@@ -148,6 +137,7 @@ function targetHTML() {
     <div class="t-sub">${isN ? NATIONS[t].lev : t === 'US' ? 'Security partner, rival of Beijing' : 'Biggest trading partner, rival of Washington'}${isN && o.scout > 0 ? ` · scouted ${o.scout}t` : ''}</div>
     <div class="bars"><div class="bar"><small><span>TRUST</span><span>${Math.round(o.rel)}</span></small><i style="--v:${o.rel}%"></i></div>
     ${isN ? `<div class="bar heat"><small><span>TENSION</span><span>${Math.round(o.heat)}</span></small><i style="--v:${o.heat}%"></i></div>` : ''}</div>
+    ${isN ? leaderRow(t) : ''}
     ${isN ? milRow(t) : ''}
     ${cs.map((c) => `<button class="t-crisis" data-a="crisis" data-uid="${c.uid}">${CRISES[c.tpl].icon} ${CRISES[c.tpl].title(ALL[c.nation].name)} · ${c.timer} turn${c.timer > 1 ? 's' : ''} left ›</button>`).join('')}`;
 }
@@ -180,7 +170,7 @@ function crisesHTML() {
     const t = CRISES[c.tpl];
     const cls = t.opp ? 'good' : c.timer <= 1 ? 'urgent' : '';
     return `<button class="card-c ${cls}" data-a="crisis" data-uid="${c.uid}">
-      <b>${t.icon} ${t.title(ALL[c.nation].name)}</b><div class="chips"><em class="tm">${t.opp ? 'OFFER ' : ''}${c.timer}T</em></div>
+      <b>${t.icon} ${t.title(ALL[c.nation].name)}</b><div class="chips"><em class="tm">${t.call ? 'CALL ' : t.opp ? 'OFFER ' : ''}${c.timer}T</em></div>
       <span>${c.nation} · ${t.opp ? 'Opportunity' : 'Resolve before the timer ends'}</span></button>`;
   }).join('');
 }
@@ -245,7 +235,43 @@ function renderDock() {
   $('#hint').textContent = ui.target ? `TARGET · ${ALL[ui.target].name.toUpperCase()}` : 'TAP A NODE TO TARGET';
 }
 
-function render() { renderHud(); updateMap(); renderPanel(); renderDock(); }
+function moodNow() {
+  if (!S || !ui.live) return 'calm';
+  if (S.war) return 'war';
+  const maxHeat = Math.max(...Object.values(S.nations).map((n) => n.heat));
+  const urgent = S.crises.some((c) => !CRISES[c.tpl].opp && c.timer <= 1);
+  if (urgent || maxHeat >= 70 || S.g.stab < 30 || S.g.res < 22 || S.g.det < 22) return 'tense';
+  return 'calm';
+}
+function render() { renderHud(); updateMap(); renderPanel(); renderDock(); saveGame(); music.setMood(moodNow()); }
+
+// ---------- autosave ----------
+function saveGame() {
+  if (!ui.live || !S) return;
+  if (S.over) { store.set('save', ''); return; }
+  try { store.set('save', E.serialize(S)); } catch { /* storage full or blocked */ }
+}
+function savedInfo() {
+  const raw = store.get('save');
+  if (!raw) return null;
+  try { const s = E.restore(raw); return s.over ? null : s; } catch { return null; }
+}
+
+function sparkHTML(hist) {
+  if (!hist || hist.length < 2) return '';
+  const W = 300, H = 70, n = hist.length;
+  const x = (i) => (i / (n - 1)) * (W - 4) + 2, y = (v) => H - 3 - (v / 100) * (H - 6);
+  const line = (k, c) => `<polyline fill="none" stroke="${c}" stroke-width="2" stroke-linejoin="round" points="${hist.map((h, i) => `${x(i).toFixed(1)},${y(h[k]).toFixed(1)}`).join(' ')}"/>`;
+  return `<svg class="spark" viewBox="0 0 ${W} ${H}" preserveAspectRatio="none" role="img" aria-label="Gauges over your term">${line('stab', '#2ee6c9')}${line('det', '#ff4d5e')}${line('hub', '#5aa9ff')}${line('res', '#ffb547')}</svg>
+    <div class="legend"><i style="background:#2ee6c9"></i>Stab <i style="background:#ff4d5e"></i>Deter <i style="background:#5aa9ff"></i>Hub <i style="background:#ffb547"></i>Resil</div>`;
+}
+function debriefHTML() {
+  const d = E.debrief(S);
+  if (!d.moments.length && d.hist.length < 2) return '';
+  return `<div class="meta" style="margin:10px 0 4px">YOUR TERM IN MOMENTS</div>
+    ${sparkHTML(d.hist)}
+    <ul class="list moments">${d.moments.map((m) => `<li class="${m.tone === 'good' ? 'new' : 'erupt'}"><b>${m.when}</b> ${m.text}</li>`).join('')}</ul>`;
+}
 
 // ---------- feedback helpers ----------
 function chipsHTML(list) {
@@ -275,7 +301,8 @@ function titleSheet() {
   const best = store.get('best');
   sheet(`<div class="title-card"><div class="logo">RED DOT</div>
     <p class="tag-line">Twenty quarters. Eight neighbours. Two giants.<br>Hold the line, keep the lights on, don't blink.</p>
-    <button class="btn" data-a="start">Start Term</button>
+    ${(() => { const sv = savedInfo(); return sv ? `<button class="btn" data-a="resume">Continue · ${E.turnLabel(sv)}</button>` : ''; })()}
+    <button class="btn ${savedInfo() ? 'alt' : ''}" data-a="start">New Term</button>
     <div class="row2" style="margin-top:8px"><button class="btn alt" data-a="daily">Daily Seed</button><button class="btn alt" data-a="how">How to Play</button></div>
     ${best ? `<div class="best">BEST SCORE ${best}</div>` : ''}</div>`, { dismiss: false });
 }
@@ -284,7 +311,7 @@ function howSheet(back) {
   sheet(`<div class="s-head"><span class="ico">🧭</span><div><h2>How to play</h2><div class="meta">ONE TERM ≈ 10 MINUTES</div></div></div>
     <ol class="how">
       <li><b>Survive 20 quarters.</b> Keep Stability, Deterrence, Hub and Resilience above zero, and do not let a hostile neighbour find you defenceless.</li>
-      <li><b>3 action points a turn.</b> Tap a node on the radar to target it, then pick an action. Everything costs AP and usually money.</li>
+      <li><b>4 action points a turn.</b> Tap a node on the radar to target it, then pick an action. Everything costs AP and usually money.</li>
       <li><b>Crises tick down.</b> The badge on the map is the timer. Ignore one and it erupts. Open the Crises tab to respond.</li>
       <li><b>Gambles need nerve.</b> Risky options show odds and must be held to commit. Scout a nation to reveal its hidden intent and exact odds.</li>
       <li><b>Build your forces.</b> The Forces tab lists real-world equipment from many suppliers. Buy from the same supplier to unlock better kit, and mind the politics. Deterrence comes from your forces and decays as the region arms.</li>
@@ -296,7 +323,7 @@ function howSheet(back) {
 function menuSheet() {
   sheet(`<div class="s-head"><span class="ico">⚙️</span><div><h2>Menu</h2></div></div>
     <button class="btn alt" data-a="how">How to play</button>
-    <button class="btn alt" data-a="mute" style="margin-top:8px">Sound &amp; haptics: ${ui.muted ? 'OFF' : 'ON'}</button>
+    <div class="row2" style="margin-top:8px"><button class="btn alt" data-a="mute">Sounds &amp; haptics: ${music.sfxOn ? 'ON' : 'OFF'}</button><button class="btn alt" data-a="musicbtn">Music: ${music.musicOn ? 'ON' : 'OFF'}</button></div>
     <button class="btn alt" data-a="restart" style="margin-top:8px">Abandon term &amp; restart</button>
     <button class="btn" data-a="close" style="margin-top:8px">Resume</button>`);
 }
@@ -323,7 +350,7 @@ function crisisSheet(uid) {
       ${b ? `<div class="risk"><i class="${b.known ? '' : 'fuzzy'}" style="--p:${b.p}%"></i><small><span>${b.known ? b.p + '% to succeed' : `≈${b.lo}–${b.hi}% · scout for exact`}</span><span>HOLD TO COMMIT</span></small></div><div class="hold"></div>` : ''}
       ${o.ok ? '' : `<span class="why">${o.reason}</span>`}</button>`;
   }).join('');
-  sheet(`<div class="s-head"><span class="ico">${t.icon}</span><div><h2>${t.title(nm)}</h2><div class="meta">${c.nation} · ${t.opp ? 'OFFER' : 'CRISIS'} · ${c.timer} TURN${c.timer > 1 ? 'S' : ''} LEFT · ${S.ap} AP</div></div></div>
+  sheet(`<div class="s-head"><span class="ico">${t.icon}</span><div><h2>${t.title(nm)}</h2><div class="meta">${c.nation} · ${t.call ? 'NIGHT CALL' : t.opp ? 'OFFER' : 'CRISIS'} · ${c.timer} TURN${c.timer > 1 ? 'S' : ''} LEFT · ${S.ap} AP</div></div></div>
     <p class="s-text">${t.text(nm, c)}</p>${html}<button class="btn alt" data-a="close">Decide later</button>`);
 }
 
@@ -332,6 +359,7 @@ function commitOpt(uid, i) {
   const before = E.snapshot(S);
   const r = E.resolveCrisis(S, uid, i);
   if (!r.ok) { sfx.bad(); return; }
+  if (r.kind === 'win' || r.kind === 'lose') sfx.commit();
   const chips = E.diff(before, E.snapshot(S));
   const head = r.kind === 'win' ? 'SUCCESS' : r.kind === 'lose' ? 'BACKFIRE' : 'DONE';
   if (r.kind === 'lose') { sfx.bad(); haptic([40, 40, 40]); shake('bad'); } else { sfx.ok(); haptic(15); }
@@ -379,6 +407,7 @@ function showOver() {
   sheet(`<div class="res-head ${win ? 'win' : 'lose'}">${win ? 'TERM COMPLETE' : 'TERM ENDED'}</div>
     <h2 style="margin-bottom:4px">${o.title}</h2><p class="s-text">${o.text}</p>
     <div class="meta" style="margin-bottom:4px">RANK · ${sc.rank.toUpperCase()}${newBest ? ' · NEW BEST!' : ''}</div>
+    ${debriefHTML()}
     <table class="score">${rows}<tr class="tot"><td>Total</td><td>${sc.total}</td></tr></table>
     <div class="row2"><button class="btn alt" data-a="share">Share</button><button class="btn" data-a="restart">Play again</button></div>`, { dismiss: false });
 }
@@ -395,6 +424,7 @@ function start(mode) {
   ui.mode = mode;
   ui.seed = mode === 'daily' ? E.hashSeed(new Date().toISOString().slice(0, 10)) : undefined;
   S = E.newGame(ui.seed);
+  ui.live = true;
   ui.target = null; ui.tab = 'cri'; ui.cat = 'dip';
   render();
   ui.brief = () => reportSheet(`${E.turnLabel(S)} · Briefing`, [{ kind: 'income', text: 'You are Singapore\'s Prime Minister. Survive five years.' }], S.created || [], [], '🔴');
@@ -406,22 +436,29 @@ const handlers = {
   close: () => closeSheet(),
   title: () => titleSheet(),
   brief: () => ui.brief && ui.brief(),
+  resume: () => {
+    const sv = savedInfo(); if (!sv) return;
+    S = sv; ui.live = true; ui.target = null; ui.tab = S.crises.length ? 'cri' : 'act'; ui.cat = 'dip'; ui.warSnap = null;
+    closeSheet(); render();
+    if (!warCheck()) toast([{ label: 'Welcome back, Prime Minister', d: 0, good: true }]);
+  },
   start: () => start('random'),
   daily: () => start('daily'),
   how: (el) => howSheet(S && !S.over && $('.title-card') ? 'title' : undefined),
   menu: () => menuSheet(),
-  mute: () => { ui.muted = !ui.muted; store.set('muted', ui.muted ? '1' : '0'); menuSheet(); },
+  mute: () => { music.setSfx(!music.sfxOn); store.set('sfx', music.sfxOn ? '1' : '0'); sfx.tick(); menuSheet(); },
+  musicbtn: () => { music.setMusic(!music.musicOn); store.set('music', music.musicOn ? '1' : '0'); menuSheet(); },
   restart: () => { closeSheet(); titleSheet(); },
   share: () => shareResult(),
   tab: (el) => { ui.tab = el.dataset.tab; renderPanel(); },
   fcat: (el) => { ui.fcat = el.dataset.cat; renderPanel(); },
   pick: (el) => { ui.target = el.dataset.code; render(); },
-  unit: (el) => { sfx.tap(); orderSheet(el.dataset.id); },
+  unit: (el) => { orderSheet(el.dataset.id); },
   order: (el) => {
     const before = E.snapshot(S);
     const r = E.buyUnit(S, el.dataset.id);
     if (!r.ok) { sfx.bad(); return; }
-    sfx.ok(); haptic(15); closeSheet();
+    sfx.kaching(); haptic([12, 40, 18]); closeSheet();
     toast([{ label: 'Ordered ' + unitById[el.dataset.id].name, d: 0, good: true }, ...E.diff(before, E.snapshot(S))].slice(0, 6));
     render();
   },
@@ -436,12 +473,12 @@ const handlers = {
     const before = E.snapshot(S);
     const r = E.doAction(S, id, ui.target);
     if (!r.ok) { sfx.bad(); return; }
-    sfx.tap(); haptic(10);
-    toast(E.diff(before, E.snapshot(S)));
+    haptic(10);
+    toast([...(r.note ? [{ label: r.note, d: 0, good: true }] : []), ...E.diff(before, E.snapshot(S))].slice(0, 6));
     render();
     if (S.over) showOver(); else warCheck();
   },
-  crisis: (el) => { sfx.tap(); crisisSheet(Number(el.dataset.uid)); },
+  crisis: (el) => { crisisSheet(Number(el.dataset.uid)); },
   opt: (el, e) => {
     if (el.dataset.brink && e.detail !== 0) return; // pointer users must hold; keyboard commits directly
     commitOpt(Number(el.dataset.uid), Number(el.dataset.i));
@@ -450,15 +487,19 @@ const handlers = {
   confirmEnd: () => doEnd(),
 };
 
+// browsers only allow audio after a gesture, so the first touch starts the score
+['pointerdown', 'keydown'].forEach((ev) => document.addEventListener(ev, () => music.unlock(), { once: true, capture: true }));
+document.addEventListener('visibilitychange', () => { document.hidden ? music.pause() : music.resume(); });
+
 document.addEventListener('click', (e) => {
   if (performance.now() - lastCommit < 450) return;
   const el = e.target.closest('[data-a]');
-  if (el && !el.disabled && handlers[el.dataset.a]) { handlers[el.dataset.a](el, e); return; }
+  if (el && !el.disabled && handlers[el.dataset.a]) { if (el.dataset.a !== 'mute') sfx.tick(); handlers[el.dataset.a](el, e); return; }
   const node = e.target.closest('.node');
   if (node && S) {
     const code = node.dataset.code;
     ui.target = ui.target === code ? null : code;
-    ui.tab = 'act'; sfx.tap(); haptic(6);
+    ui.tab = 'act'; sfx.select(); haptic(6);
     render();
   }
 });
@@ -520,6 +561,7 @@ function warOp(id) {
   const w = S.war, before = E.snapshot(S);
   const r = E.warOp(S, id);
   if (!r.ok) { sfx.bad(); return; }
+  sfx.boom();
   const lostBad = r.lines.some((l) => /Lost|strikes your/.test(l));
   lostBad ? (sfx.bad(), haptic([30, 30]), shake('bad')) : (sfx.ok(), haptic(15));
   render();
@@ -536,6 +578,7 @@ function warOp(id) {
 // ---------- boot ----------
 buildMap();
 S = E.newGame(12345);
+ui.live = false;
 ui.mode = 'random';
 render();
 titleSheet();

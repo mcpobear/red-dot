@@ -30,7 +30,8 @@ python3 -m http.server 8080      # then open http://localhost:8080
 | `js/data.js` | Nations (incl. military strength), great powers, player actions, crisis templates. **Most balancing/content edits go here.** |
 | `js/forces.js` | Order of battle: named equipment, suppliers, costs, upkeep, supplier politics, Deterrence formula. **Add or retune equipment here.** |
 | `js/engine.js` | Pure game logic (turn loop, crises, procurement, wars, scoring). No DOM. |
-| `js/main.js` | UI: radar map, HUD, action panel, crisis sheets, hold-to-commit, audio/haptics. |
+| `js/main.js` | UI: radar map, HUD, action panel, crisis sheets, hold-to-commit, autosave, debrief. |
+| `js/audio.js` | Procedural music (calm / tense / war, crossfaded) and all UI sounds incl. the cash-register "kaching". No audio files. |
 | `css/style.css` | Responsive layout: stacked on phones, two-pane when width ≥ 640px (unfolded foldables, landscape, desktop). |
 | `tests/sim.mjs` | Balance harness: `node tests/sim.mjs 400` plays seeded games with idle / random / smart bots. |
 
@@ -44,7 +45,14 @@ python3 -m http.server 8080      # then open http://localhost:8080
 
 ## Balance snapshot (500 seeds)
 
-Idle bot 0% wins, random bot ~17%, a competent heuristic bot ~65% (about half a war per game). Tune in `data.js` / `forces.js` / `engine.js` and re-run `node tests/sim.mjs 500`.
+4 AP a turn, $60B start. Idle bot 0% wins, random bot ~49%, a competent heuristic bot ~93% (humans land well below the bot). Tune in `data.js` / `forces.js` / `engine.js` and re-run `node tests/sim.mjs 500`.
+
+## Leaders, night calls, saves
+
+- Each neighbour has a fictional leader with a style (Charmer, Dealmaker, Hardliner, Proud) that tweaks how State Visits, Trade Pacts and Shows of Force land. See `LEADERS` / `leaderBonus` in `data.js`.
+- Night calls (`call_*` crises) last one turn: favours, tips and warnings from leaders.
+- The game autosaves to `localStorage` after every action (including the RNG state) and offers Continue on the title screen. The end screen shows a gauge graph and the key moments of your term.
+- Music and sound toggles are in the menu (⋯). Audio starts on the first tap, as browsers require.
 
 ## Adding a crisis
 

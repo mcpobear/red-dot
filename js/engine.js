@@ -1,20 +1,42 @@
 // Pure game logic. No DOM. Mutates a state object `s`; the UI renders from it.
-import { NATIONS, POWERS, ACTIONS, CRISES, H, clamp } from './data.js';
+import { NATIONS, POWERS, ACTIONS, CRISES, H, clamp, leaderBonus } from './data.js';
 import { UNITS, unitById, START_FORCES, START_PURCH, POLITICS, SUPPLIERS, powers, syncDet, upkeep } from './forces.js';
 
 export const MAX_TURN = 20;
-export const AP_PER_TURN = 3;
+export const AP_PER_TURN = 4;
 export const START_YEAR = 2027;
 export const MAX_WAR_ROUNDS = 6;
 export const ORDERS_PER_TURN = 2;
 
 export function mulberry32(a) {
-  return function () {
+  const f = function () {
     a |= 0; a = (a + 0x6D2B79F5) | 0;
     let t = Math.imul(a ^ (a >>> 15), 1 | a);
     t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t;
     return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
   };
+  f.state = () => a; // lets a save file resume the exact random stream
+  return f;
+}
+
+// ---------- save / load ----------
+export function serialize(s) {
+  const { rand, ...rest } = s;
+  return JSON.stringify({ ...rest, rngState: rand.state() });
+}
+export function restore(json) {
+  const { rngState, ...rest } = JSON.parse(json);
+  return { ...rest, rand: mulberry32(rngState) };
+}
+
+// ---------- story log (for the end-of-term debrief) ----------
+function logEv(s, text, w, tone = 'bad') {
+  if (!s.log) s.log = [];
+  s.log.push({ turn: s.turn, when: turnLabel(s), text, w, tone });
+}
+export function debrief(s) {
+  const moments = [...(s.log || [])].sort((a, b) => b.w - a.w).slice(0, 5).sort((a, b) => a.turn - b.turn);
+  return { moments, hist: s.hist || [] };
 }
 
 export function hashSeed(str) {
@@ -46,13 +68,13 @@ export function newGame(seed = Math.floor(Math.random() * 2147483646) + 1) {
   const rand = mulberry32(seed);
   const jit = () => Math.round((rand() - 0.5) * 10);
   const s = {
-    seed, rand, turn: 1, ap: AP_PER_TURN, money: 45,
+    seed, rand, turn: 1, ap: AP_PER_TURN, money: 60,
     g: { stab: 60, det: 40, hub: 50, res: 55 },
     powers: { US: { rel: 50 }, CN: { rel: 50 } },
     nations: {}, crises: [], cd: {}, shield: 0, uid: 1, lastDet: 40,
     stats: { resolved: 0, failed: 0, erupted: 0, warsWon: 0, warsLost: 0 }, over: null,
     forces: { ...START_FORCES }, purch: { ...START_PURCH }, orders: [], ordersThisTurn: 0,
-    arms: 0, posture: 0, war: null, pendingWar: null, supplyHits: 0,
+    arms: 0, posture: 0, war: null, pendingWar: null, supplyHits: 0, log: [], hist: [],
   };
   for (const [c, n] of Object.entries(NATIONS)) {
     s.nations[c] = { rel: clamp(n.rel + jit()), heat: clamp(n.heat + jit()), intent: 'distracted', scout: 0, mil: { ...n.mil } };
@@ -70,7 +92,7 @@ export const nm = (code) => (NATIONS[code] || POWERS[code]).name;
 export function income(s) {
   const rels = Object.values(s.nations).map((n) => n.rel);
   const avg = rels.reduce((a, b) => a + b, 0) / rels.length;
-  return Math.round(1 + s.g.hub * 0.1 + (avg - 50) * 0.1 + (s.powers.CN.rel > 60 ? 2 : 0) - (upkeep(s) - s.baseUpkeep));
+  return Math.round(2 + s.g.hub * 0.1 + (avg - 50) * 0.1 + (s.powers.CN.rel > 60 ? 2 : 0) - (upkeep(s) - s.baseUpkeep));
 }
 
 export function turnLabel(s) {
@@ -98,10 +120,11 @@ export function doAction(s, id, target) {
   if (!st.ok) return st;
   s.ap -= a.ap; s.money -= a.cost;
   a.fx(s, target);
+  const note = leaderBonus(s, id, target);
   if (a.cd) s.cd[id] = a.cd;
   flushWar(s);
   checkOver(s);
-  return { ok: true };
+  return { ok: true, note };
 }
 
 // ---------- crises ----------
@@ -148,6 +171,7 @@ export function resolveCrisis(s, uid, i) {
     kind = s.rand() * 100 < p ? 'win' : 'lose';
     (kind === 'win' ? o.win : o.lose)(s, c);
     text = kind === 'win' ? (o.w || 'It worked.') : (o.l || 'It backfired.');
+    logEv(s, `${kind === 'win' ? 'Gamble paid off' : 'Gamble failed'} (${p}%): ${o.label} — ${t.title(nm(c.nation))}. ${text}`, kind === 'win' ? 40 + (100 - p) / 4 : 55 + p / 4, kind === 'win' ? 'good' : 'bad');
   } else {
     o.fx(s, c);
   }
@@ -175,9 +199,9 @@ function spawnCrises(s) {
       out.push(addCrisis(s, 'ultimatum', code));
     }
   }
-  let count = 1 + (r() < 0.55 ? 1 : 0) + (s.turn > 6 && r() < 0.4 ? 1 : 0);
+  let count = 1 + (r() < 0.8 ? 1 : 0) + (s.turn > 4 && r() < 0.65 ? 1 : 0);
   if (s.turn === 1) count = Math.max(count, 2);
-  for (let k = 0; k < count && s.crises.length < 5; k++) {
+  for (let k = 0; k < count && s.crises.length < 6; k++) {
     const imb = Math.abs(s.powers.US.rel - s.powers.CN.rel);
     let subject;
     if (r() < (imb > 30 ? 0.35 : 0.12)) subject = weightedPick(r, ['US', 'CN'], (c) => s.powers[c].rel);
@@ -214,6 +238,7 @@ export function checkOver(s) {
     else {
       const foe = ['MY', 'ID'].sort((a, b) => s.nations[b].heat - s.nations[a].heat)[0];
       g.res = 20;
+      logEv(s, 'Water, food and power ran dry. A supply war began.', 90);
       startWar(s, foe, { aggressor: false, start: -10, reason: 'supply' });
     }
   }
@@ -234,7 +259,7 @@ export function endTurn(s) {
       const t = CRISES[c.tpl];
       const txt = t.erupt(s, c);
       s.crises = s.crises.filter((x) => x !== c);
-      if (!t.opp) s.stats.erupted++;
+      if (!t.opp) { s.stats.erupted++; logEv(s, `${t.title(nm(c.nation))} was ignored: ${txt}`, 45); }
       ev.push({ kind: t.opp ? 'info' : 'erupt', text: `${t.title(nm(c.nation))}: ${txt}` });
     }
   }
@@ -252,9 +277,10 @@ export function endTurn(s) {
   s.arms += US > 65 ? 0.5 : 0.8;
   s.posture = Math.trunc(s.posture * 0.7);
   syncDet(s);
-  H.g(s, 'res', -3);
+  H.g(s, 'res', -4);
   H.g(s, 'hub', CN > 65 ? -1 : -2);
-  if (s.g.stab > 50) H.g(s, 'stab', -1);
+  if (s.g.stab > 70) H.g(s, 'stab', -1);
+  
   if (Math.abs(US - CN) > 35) { H.g(s, 'stab', -1); ev.push({ kind: 'info', text: 'Leaning too far toward one giant strains the home front (Stability −1).' }); }
   for (const p of Object.values(s.powers)) { if (p.rel > 60) p.rel -= 1; else if (p.rel < 40) p.rel += 1; }
 
@@ -280,7 +306,9 @@ export function endTurn(s) {
   const inc = income(s);
   s.money += inc;
   ev.push({ kind: 'income', text: `Income +$${inc}B` });
-  if (s.money < 5) { H.g(s, 'stab', -3); ev.push({ kind: 'erupt', text: 'Austerity unrest: Stability −3 (funds nearly empty).' }); }
+  if (s.money < 3) { H.g(s, 'stab', -2); ev.push({ kind: 'erupt', text: 'Austerity unrest: Stability −2 (funds nearly empty).' }); }
+
+  (s.hist = s.hist || []).push({ t: s.turn, stab: s.g.stab, det: s.g.det, hub: s.g.hub, res: s.g.res, money: s.money });
 
   // 5) did we survive?
   const over = checkOver(s);
@@ -494,6 +522,7 @@ function finishWar(s, kind) {
   let title, text;
   if (kind === 'defeat') {
     s.stats.warsLost++;
+    logEv(s, `War with ${fn}: defeated in the field.`, 100);
     title = 'Defeated in the Field'; text = `${fn}'s forces overwhelm your defences. The war is lost.`;
     s.over = { result: 'lose', title, text, score: score(s, false) };
     s.war = null;
@@ -524,6 +553,7 @@ function finishWar(s, kind) {
     }
     if (w.aggressor) for (const c of others) H.rel(s, c, -3);
   }
+  logEv(s, `War with ${fn}: ${title}.`, 100, kind === 'victory' || title === 'Favourable Ceasefire' ? 'good' : 'bad');
   s.war = null;
   s.lastDet = s.g.det;
   checkOver(s);
