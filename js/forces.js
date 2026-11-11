@@ -97,8 +97,26 @@ const BASE_W = weighted((() => {
 })());
 
 // Deterrence = how formidable your forces look, minus the regional arms race, plus short-term posture.
+// ---------- quality vs quantity ----------
+// Headline numbers are face value. In war, Singapore's edge in training, sensors, networking
+// and maintenance multiplies its strength, while neighbours' forces are older and spread across
+// large territories and archipelagos (only part can be brought to bear).
+export const SG_EDGE_BASE = 1.2;
+export const TECH = { MY: 0.85, ID: 0.8, BN: 1.0, TH: 0.85, VN: 0.9, KH: 0.7, LA: 0.6, MM: 0.7 };
+export const COMMIT = { MY: 0.75, ID: 0.6, BN: 1.0, TH: 0.7, VN: 0.7, KH: 0.8, LA: 0.85, MM: 0.65 };
+export const foeFactor = (code) => (TECH[code] || 0.8) * (COMMIT[code] || 0.7);
+// Modern (tier 2-3) kit widens the gap: +0.02 per advanced formation, capped at +0.25.
+export function edge(s) {
+  let adv = 0;
+  for (const [id, n] of Object.entries(s.forces)) { const u = unitById[id]; if (u && u.tier >= 2) adv += n; }
+  return SG_EDGE_BASE + Math.min(0.25, adv * 0.02);
+}
+export function effMe(s) { const p = powers(s), q = edge(s); return { land: p.land * q, air: p.air * q, sea: p.sea * q }; }
+export function effFoe(n, code) { const k = foeFactor(code); return { land: n.mil.land * k, air: n.mil.air * k, sea: n.mil.sea * k }; }
+
 export function syncDet(s) {
-  s.g.det = clamp(Math.round(40 + (weighted(powers(s)) - BASE_W) * 1.6 - (s.arms || 0) + (s.posture || 0)));
+  // the baseline edge is already part of the starting 40; extra modern kit adds to deterrence
+  s.g.det = clamp(Math.round(40 + (weighted(powers(s)) - BASE_W) * 1.6 + (edge(s) - SG_EDGE_BASE) * 40 - (s.arms || 0) + (s.posture || 0)));
 }
 
 // Rough Deterrence gained by adding one unit (before the arms race eats into it).

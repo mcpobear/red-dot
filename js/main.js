@@ -2,7 +2,8 @@
 import { NATIONS, POWERS, ACTIONS, CRISES, INTENTS, CATS, LEADERS, STYLES } from './data.js';
 import * as E from './engine.js';
 import { sfx, music } from './audio.js';
-import { UNITS, unitById, SUPPLIERS, POLITICS_NOTE, DOMAINS, powers, upkeep, detGain } from './forces.js';
+import { VERSION, BUILD_DATE, CHANGELOG } from './version.js';
+import { UNITS, unitById, SUPPLIERS, POLITICS_NOTE, DOMAINS, powers, upkeep, detGain, edge, effMe, effFoe, foeFactor } from './forces.js';
 
 const $ = (q, r = document) => r.querySelector(q);
 const $$ = (q, r = document) => [...r.querySelectorAll(q)];
@@ -118,7 +119,8 @@ function renderHud() {
 const approx = (v, known) => (known ? String(Math.round(v)) : '~' + Math.round(v / 5) * 5);
 function milRow(code) {
   const n = S.nations[code], k = n.scout > 0, me = powers(S);
-  return `<div class="milrow"><span>MIL</span><span>LAND ${approx(n.mil.land, k)}</span><span>AIR ${approx(n.mil.air, k)}</span><span>SEA ${approx(n.mil.sea, k)}</span><em>YOU ${me.land}/${me.air}/${me.sea}</em></div>`;
+  return `<div class="milrow"><span>MIL</span><span>LAND ${approx(n.mil.land, k)}</span><span>AIR ${approx(n.mil.air, k)}</span><span>SEA ${approx(n.mil.sea, k)}</span><em>YOU ${me.land}/${me.air}/${me.sea}</em></div>
+    <div class="milrow qual"><span>QUALITY</span><span>YOU ×${edge(S).toFixed(2)}</span><span>THEM ×${foeFactor(code).toFixed(2)}</span><em>in a war, face value is scaled by this</em></div>`;
 }
 
 function leaderRow(code) {
@@ -197,7 +199,7 @@ function overviewHTML() {
     ${inbound ? `<h4>In transit</h4><ul class="list">${inbound}</ul>` : ''}
     <h4>Regional balance</h4>
     <table class="mil"><tr><th></th><th>LAND</th><th>AIR</th><th>SEA</th></tr><tr class="me"><td><b>SG</b> You</td><td>${me.land}</td><td>${me.air}</td><td>${me.sea}</td></tr>${rows}</table>
-    <p class="fine">Red = they out-muscle you in that arm. Scout a nation for exact figures.</p>
+    <p class="fine">Red = they out-muscle you <i>on paper</i>. In a war their numbers shrink (older kit, forces spread over big territories) while yours get a quality edge of <b>×${edge(S).toFixed(2)}</b>. Buying advanced (tier 2-3) kit widens it. Scout a nation for exact figures.</p>
     <h4>Your order of battle</h4><ul class="oob">${owned}</ul>`;
 }
 
@@ -304,7 +306,8 @@ function titleSheet() {
     ${(() => { const sv = savedInfo(); return sv ? `<button class="btn" data-a="resume">Continue · ${E.turnLabel(sv)}</button>` : ''; })()}
     <button class="btn ${savedInfo() ? 'alt' : ''}" data-a="start">New Term</button>
     <div class="row2" style="margin-top:8px"><button class="btn alt" data-a="daily">Daily Seed</button><button class="btn alt" data-a="how">How to Play</button></div>
-    ${best ? `<div class="best">BEST SCORE ${best}</div>` : ''}</div>`, { dismiss: false });
+    ${best ? `<div class="best">BEST SCORE ${best}</div>` : ''}
+    <div class="ver">v${VERSION} · ${BUILD_DATE}</div></div>`, { dismiss: false });
 }
 
 function howSheet(back) {
@@ -313,6 +316,7 @@ function howSheet(back) {
       <li><b>Survive 20 quarters.</b> Keep Stability, Deterrence, Hub and Resilience above zero, and do not let a hostile neighbour find you defenceless.</li>
       <li><b>4 action points a turn.</b> Tap a node on the radar to target it, then pick an action. Everything costs AP and usually money.</li>
       <li><b>Crises tick down.</b> The badge on the map is the timer. Ignore one and it erupts. Open the Crises tab to respond.</li>
+      <li><b>Quality beats quantity.</b> Neighbours may look bigger on paper, but your tech edge and their spread-out forces count in a war, and make hawks think twice.</li>
       <li><b>Gambles need nerve.</b> Risky options show odds and must be held to commit. Scout a nation to reveal its hidden intent and exact odds.</li>
       <li><b>Build your forces.</b> The Forces tab lists real-world equipment from many suppliers. Buy from the same supplier to unlock better kit, and mind the politics. Deterrence comes from your forces and decays as the region arms.</li>
       <li><b>You can fight.</b> Cut water, failed ultimatums and open attacks lead to war. Win the air, hold the Strait, then press the land, or seek a ceasefire.</li>
@@ -325,7 +329,9 @@ function menuSheet() {
     <button class="btn alt" data-a="how">How to play</button>
     <div class="row2" style="margin-top:8px"><button class="btn alt" data-a="mute">Sounds &amp; haptics: ${music.sfxOn ? 'ON' : 'OFF'}</button><button class="btn alt" data-a="musicbtn">Music: ${music.musicOn ? 'ON' : 'OFF'}</button></div>
     <button class="btn alt" data-a="restart" style="margin-top:8px">Abandon term &amp; restart</button>
-    <button class="btn" data-a="close" style="margin-top:8px">Resume</button>`);
+    <button class="btn" data-a="close" style="margin-top:8px">Resume</button>
+    <div class="ver">Red Dot v${VERSION} · ${BUILD_DATE}</div>
+    <ul class="list changelog">${CHANGELOG.slice(0, 3).map(([v, n]) => `<li><b>v${v}</b> ${n}</li>`).join('')}</ul>`);
 }
 
 function reportSheet(title, events, created, chips, icon = '📋') {
@@ -488,7 +494,8 @@ const handlers = {
 };
 
 // browsers only allow audio after a gesture, so the first touch starts the score
-['pointerdown', 'keydown'].forEach((ev) => document.addEventListener(ev, () => music.unlock(), { once: true, capture: true }));
+// iOS only accepts touchend/click as a gesture, so keep trying until the audio engine is actually running
+['touchend', 'pointerup', 'click', 'keydown'].forEach((ev) => document.addEventListener(ev, () => { if (!music.running) music.unlock(); }, { capture: true }));
 document.addEventListener('visibilitychange', () => { document.hidden ? music.pause() : music.resume(); });
 
 document.addEventListener('click', (e) => {
@@ -534,16 +541,17 @@ function warCheck() {
 function confirmWar() {
   const t = ui.target;
   if (!t || !S.nations[t]) { sfx.bad(); return; }
-  const n = S.nations[t], me = powers(S), k = n.scout > 0;
-  const row = (l, a, b) => `<tr><td>${l}</td><td>${a}</td><td class="${b > a ? 'over' : ''}">${approx(b, k)}</td></tr>`;
+  const n = S.nations[t], me = effMe(S), fe = effFoe(n, t), k = n.scout > 0;
+  const row = (l, a, b) => `<tr><td>${l}</td><td>${Math.round(a)}</td><td class="${b > a ? 'over' : ''}">${approx(b, k)}</td></tr>`;
   sheet(`<div class="s-head"><span class="ico">⚔️</span><div><h2>War with ${NATIONS[t].name}?</h2><div class="meta">THIS CANNOT BE UNDONE</div></div></div>
-    <table class="mil"><tr><th></th><th>YOU</th><th>THEM</th></tr>${row('Land', me.land, n.mil.land)}${row('Air', me.air, n.mil.air)}${row('Sea', me.sea, n.mil.sea)}</table>
+    <table class="mil"><tr><th>EFFECTIVE</th><th>YOU</th><th>THEM</th></tr>${row('Land', me.land, fe.land)}${row('Air', me.air, fe.air)}${row('Sea', me.sea, fe.sea)}</table>
+    <div class="meta" style="margin:-2px 0 8px">Your quality ×${edge(S).toFixed(2)} · their kit and spread-out territory ×${foeFactor(t).toFixed(2)}</div>
     <p class="s-text">Wars drain Stability and Hub every round and cost you equipment. Win and the neighbour is humbled, but the rest of the region will not forget who started it.${k ? '' : ' Scout them for exact figures.'}</p>
     <div class="row2"><button class="btn alt" data-a="close">Stand down</button><button class="btn red" data-a="warGo">Declare war</button></div>`);
 }
 
 function warSheet(extra) {
-  const w = S.war, f = S.nations[w.foe], me = powers(S), opts = E.warOptions(S);
+  const w = S.war, f = { mil: effFoe(S.nations[w.foe], w.foe) }, me = effMe(S), opts = E.warOptions(S);
   const vs = (l, a, b) => `<div class="vs"><span>${l}</span><div class="vsbars"><i class="me" style="--v:${Math.min(100, a)}%"></i><i class="foe" style="--v:${Math.min(100, b)}%"></i></div><b>${Math.round(a)}<small> v </small>${Math.round(b)}</b></div>`;
   const pos = (w.score + 100) / 2;
   sheet(`<div class="s-head"><span class="ico">⚔️</span><div><h2>War: ${NATIONS[w.foe].name}</h2><div class="meta">ROUND ${Math.min(w.round, E.MAX_WAR_ROUNDS)}/${E.MAX_WAR_ROUNDS} · $${S.money}B · STAB ${S.g.stab}</div></div></div>

@@ -1,6 +1,6 @@
 // Pure game logic. No DOM. Mutates a state object `s`; the UI renders from it.
 import { NATIONS, POWERS, ACTIONS, CRISES, H, clamp, leaderBonus } from './data.js';
-import { UNITS, unitById, START_FORCES, START_PURCH, POLITICS, SUPPLIERS, powers, syncDet, upkeep } from './forces.js';
+import { UNITS, unitById, START_FORCES, START_PURCH, POLITICS, SUPPLIERS, powers, syncDet, upkeep, effMe, effFoe, foeFactor } from './forces.js';
 
 export const MAX_TURN = 20;
 export const AP_PER_TURN = 4;
@@ -247,6 +247,13 @@ export function checkOver(s) {
   return o;
 }
 
+// Quality tells: a neighbour that would face a technologically superior defender hesitates.
+function attackWill(s, code) {
+  const e = effFoe(s.nations[code], code), m = effMe(s);
+  const sum = (o) => o.land + o.air + o.sea;
+  return clamp(0.9 * sum(e) / Math.max(1, sum(m)), 0.3, 1);
+}
+
 export function endTurn(s) {
   if (s.war) return { events: [], created: [], over: null };
   const ev = [];
@@ -274,7 +281,7 @@ export function endTurn(s) {
     }
   }
   const US = s.powers.US.rel, CN = s.powers.CN.rel;
-  s.arms += US > 65 ? 0.5 : 0.8;
+  s.arms += US > 65 ? 0.7 : 1.1;
   s.posture = Math.trunc(s.posture * 0.7);
   syncDet(s);
   H.g(s, 'res', -4);
@@ -294,9 +301,9 @@ export function endTurn(s) {
     if (hos && detRise >= 8) dh += 3;
     if (s.g.hub > 70) dh -= 1;
     n.heat = clamp(n.heat + dh);
-    const grow = { friendly: 0.2, opportunist: 0.6, hawkish: 1.0, distracted: 0.3 }[n.intent] * (0.7 + s.rand() * 0.6);
+    const grow = { friendly: 0.2, opportunist: 0.6, hawkish: 1.0, distracted: 0.3 }[n.intent] * 1.6 * (0.7 + s.rand() * 0.6);
     for (const d of ['land', 'air', 'sea']) if (n.mil[d] > 0) n.mil[d] += grow;
-    if (n.heat >= 96 && hos && !s.war && !s.pendingWar) H.war(s, code, { aggressor: false, start: -15, reason: 'attack' });
+    if (n.heat >= 96 && hos && !s.war && !s.pendingWar && s.rand() < attackWill(s, code)) H.war(s, code, { aggressor: false, start: -15, reason: 'attack' });
     n.rel = clamp(n.rel + (n.rel > 55 ? -1 : n.rel < 45 ? 1 : 0));
     if (n.scout > 0) n.scout--;
     if (s.rand() < 0.12) n.intent = pickIntent(s, code);
@@ -432,7 +439,7 @@ export function flushWar(s) {
 }
 
 export function warOptions(s) {
-  const w = s.war, my = powers(s), f = s.nations[w.foe].mil;
+  const w = s.war, my = effMe(s), f = effFoe(s.nations[w.foe], w.foe);
   return WAR_OPS.map((op) => {
     let p;
     if (op.id === 'ceasefire') {
@@ -449,7 +456,8 @@ export function warOptions(s) {
   });
 }
 
-function hitFoe(f, dom, d) { f.mil[dom] = Math.max(0, f.mil[dom] - d); }
+// damage is dealt in effective strength, so convert back to the face-value stock
+function hitFoe(f, dom, d, code) { f.mil[dom] = Math.max(0, f.mil[dom] - d / foeFactor(code)); }
 
 function loseUnit(s, dom, lines, chance) {
   if (s.rand() >= chance) return;
@@ -477,31 +485,32 @@ export function warOp(s, id) {
     if (win) return { ok: true, lines: [`${fn} agrees to talks.`], ended: finishWar(s, 'ceasefire') };
     lines.push(`${fn} refuses terms. The fighting goes on.`);
   } else if (id === 'air') {
-    if (win) { w.airSup = Math.min(2, w.airSup + 1); w.score += 10; hitFoe(f, 'air', 5); lines.push(`Air campaign succeeds. Air superiority: level ${w.airSup}.`); loseUnit(s, 'air', lines, 0.2); }
-    else { w.score -= 7; hitFoe(f, 'air', 1); lines.push('The air campaign stalls against stiff defences.'); loseUnit(s, 'air', lines, 0.6); }
+    if (win) { w.airSup = Math.min(2, w.airSup + 1); w.score += 10; hitFoe(f, 'air', 5, w.foe); lines.push(`Air campaign succeeds. Air superiority: level ${w.airSup}.`); loseUnit(s, 'air', lines, 0.2); }
+    else { w.score -= 7; hitFoe(f, 'air', 1, w.foe); lines.push('The air campaign stalls against stiff defences.'); loseUnit(s, 'air', lines, 0.6); }
   } else if (id === 'sea') {
-    if (win) { w.seaCtl = Math.min(2, w.seaCtl + 1); w.score += 10; hitFoe(f, 'sea', 5); H.g(s, 'res', 3); H.g(s, 'hub', 2); lines.push(`The Strait is secured. Sea control: level ${w.seaCtl}.`); loseUnit(s, 'sea', lines, 0.25); }
-    else { w.score -= 7; hitFoe(f, 'sea', 1); H.g(s, 'res', -4); lines.push('A naval clash goes badly. Shipping lanes are contested.'); loseUnit(s, 'sea', lines, 0.6); }
+    if (win) { w.seaCtl = Math.min(2, w.seaCtl + 1); w.score += 10; hitFoe(f, 'sea', 5, w.foe); H.g(s, 'res', 3); H.g(s, 'hub', 2); lines.push(`The Strait is secured. Sea control: level ${w.seaCtl}.`); loseUnit(s, 'sea', lines, 0.25); }
+    else { w.score -= 7; hitFoe(f, 'sea', 1, w.foe); H.g(s, 'res', -4); lines.push('A naval clash goes badly. Shipping lanes are contested.'); loseUnit(s, 'sea', lines, 0.6); }
   } else if (id === 'land') {
-    if (win) { w.score += 14; hitFoe(f, 'land', 6); if (w.reason === 'supply') H.g(s, 'res', 4); lines.push('Your ground forces take the objective.'); loseUnit(s, 'land', lines, 0.35); }
-    else { w.score -= 10; hitFoe(f, 'land', 2); lines.push('The offensive bogs down with heavy losses.'); loseUnit(s, 'land', lines, 0.7); }
+    if (win) { w.score += 14; hitFoe(f, 'land', 6, w.foe); if (w.reason === 'supply') H.g(s, 'res', 4); lines.push('Your ground forces take the objective.'); loseUnit(s, 'land', lines, 0.35); }
+    else { w.score -= 10; hitFoe(f, 'land', 2, w.foe); lines.push('The offensive bogs down with heavy losses.'); loseUnit(s, 'land', lines, 0.7); }
   } else if (id === 'strike') {
-    if (win) { w.score += 8; for (const d of ['land', 'air', 'sea']) hitFoe(f, d, 3); lines.push('Precision strikes degrade their forces.'); }
+    if (win) { w.score += 8; for (const d of ['land', 'air', 'sea']) hitFoe(f, d, 3, w.foe); lines.push('Precision strikes degrade their forces.'); }
     else { w.score -= 3; lines.push('Strikes are intercepted or miss.'); loseUnit(s, 'air', lines, 0.15); }
   }
 
   // enemy counter-attack
   const doms = ['land', 'air', 'sea'];
-  let r = s.rand() * doms.reduce((a, d) => a + f.mil[d] + 1, 0), dom = 'land';
-  for (const d of doms) { r -= f.mil[d] + 1; if (r <= 0) { dom = d; break; } }
-  const mine = powers(s)[dom];
-  const adv = f.mil[dom] - mine - (dom === 'land' ? 6 * w.airSup : dom === 'sea' ? 3 * w.airSup : 0);
+  const fe = effFoe(f, w.foe);
+  let r = s.rand() * doms.reduce((a, d) => a + fe[d] + 1, 0), dom = 'land';
+  for (const d of doms) { r -= fe[d] + 1; if (r <= 0) { dom = d; break; } }
+  const mine = effMe(s)[dom];
+  const adv = fe[dom] - mine - (dom === 'land' ? 6 * w.airSup : dom === 'sea' ? 3 * w.airSup : 0);
   if (s.rand() * 100 < clamp(50 + adv * 1.2, 10, 85)) {
     w.score -= 6; lines.push(`${fn} strikes your ${dom} forces.`); loseUnit(s, dom, lines, 0.5);
-  } else { w.score -= 1; hitFoe(f, dom, 2); lines.push(`Their ${dom} attack is repulsed.`); }
+  } else { w.score -= 1; hitFoe(f, dom, 2, w.foe); lines.push(`Their ${dom} attack is repulsed.`); }
 
   // costs of war at home
-  H.g(s, 'stab', -2); H.g(s, 'hub', -2);
+  H.g(s, 'stab', -3); H.g(s, 'hub', -3);
   if (w.seaCtl <= 0) H.g(s, 'res', -2);
   if (s.g.res <= 0) { w.score -= 6; lines.push('Supplies run dry at home.'); }
   w.score = clamp(w.score, -100, 100);

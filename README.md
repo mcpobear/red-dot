@@ -31,6 +31,7 @@ python3 -m http.server 8080      # then open http://localhost:8080
 | `js/forces.js` | Order of battle: named equipment, suppliers, costs, upkeep, supplier politics, Deterrence formula. **Add or retune equipment here.** |
 | `js/engine.js` | Pure game logic (turn loop, crises, procurement, wars, scoring). No DOM. |
 | `js/main.js` | UI: radar map, HUD, action panel, crisis sheets, hold-to-commit, autosave, debrief. |
+| `js/version.js` | Version number and changelog shown on the title screen and in the menu. Bump it with each push (and the cache name in `sw.js`). |
 | `js/audio.js` | Procedural music (calm / tense / war, crossfaded) and all UI sounds incl. the cash-register "kaching". No audio files. |
 | `css/style.css` | Responsive layout: stacked on phones, two-pane when width ≥ 640px (unfolded foldables, landscape, desktop). |
 | `tests/sim.mjs` | Balance harness: `node tests/sim.mjs 400` plays seeded games with idle / random / smart bots. |
@@ -41,6 +42,7 @@ python3 -m http.server 8080      # then open http://localhost:8080
 - **Procurement** (Forces tab): ~30 named formations from the US, Germany, France, Sweden, Israel, South Korea, Italy, Singapore itself, China and Russia. Max 2 orders per turn, delivered after 2–3 turns, each adds upkeep to your budget.
 - **Tiers:** better kit needs earlier purchases from the same supplier (and Washington/Beijing trust for US/China tier 2–3), like Conflict's arms vendors. Buying from a supplier also moves trust: US ↔ China pull against each other, Russia costs you Washington's trust, Israel strains ties with Malaysia and Indonesia.
 - **Wars** start from a failed or ignored ultimatum, an armed option in a crisis (water, standoff), a neighbour attacking at extreme tension, a second-time supply collapse, or **Go to War** in the Defence tab. Each round you pick Air, Sea, Land, Precision Strikes or Ceasefire. Odds come from the force balance, air superiority helps the other arms, and you lose equipment. Win, force a favourable ceasefire, or go down.
+- **Quality vs quantity:** the radar/table numbers are face value. In war, Singapore's strength is multiplied by an edge (×1.20 base, +0.02 per advanced tier 2-3 formation up to ×1.45), and each neighbour's by `TECH × COMMIT` (older kit, forces spread over big territories). Tunable in `forces.js` (`TECH`, `COMMIT`, `SG_EDGE_BASE`). A neighbour at extreme tension is also less likely to actually attack a stronger-in-effect Singapore.
 - Resilience hitting zero no longer ends the game outright: the first two times it triggers a supply war (you start behind). The third time is fatal.
 
 ## Balance snapshot (500 seeds)

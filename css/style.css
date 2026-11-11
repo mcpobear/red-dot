@@ -235,3 +235,7 @@ table.mil td.over { color: var(--red); } table.mil tr.me td { color: var(--teal)
 .legend i { width: 8px; height: 8px; border-radius: 2px; display: inline-block; margin-left: 6px; }
 .moments li { margin: 4px 0; font-size: 13px; line-height: 1.35; }
 .moments li b { font: 700 10px var(--mono); color: var(--muted); margin-right: 6px; letter-spacing: .05em; }
+
+.ver { font: 600 11px var(--mono); letter-spacing: .08em; color: var(--muted); text-align: center; margin-top: 14px; }
+.changelog li { font-size: 12px; color: var(--muted); margin: 3px 0; }
+.changelog li b { color: var(--teal); margin-right: 4px; }
