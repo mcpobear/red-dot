@@ -7,6 +7,8 @@ let calmG, tenseG, warG;
 let timer = null, nextTime = 0, step = 0, bar = 0;
 let mood = 'calm';
 const state = { sfxOn: true, musicOn: true };
+const MUSIC_VOL = 1.2;
+let silentEl = null;
 
 const mtof = (m) => 440 * Math.pow(2, (m - 69) / 12);
 const rnd = (a, b) => a + Math.random() * (b - a);
@@ -14,9 +16,12 @@ const rnd = (a, b) => a + Math.random() * (b - a);
 function ensure() {
   if (ctx || !AC) return ctx;
   ctx = new AC();
-  master = ctx.createGain(); master.gain.value = 0.9; master.connect(ctx.destination);
-  sfxBus = ctx.createGain(); sfxBus.gain.value = 0.9; sfxBus.connect(master);
-  musBus = ctx.createGain(); musBus.gain.value = state.musicOn ? 0.55 : 0; musBus.connect(master);
+  master = ctx.createGain(); master.gain.value = 1.0;
+  const comp = ctx.createDynamicsCompressor(); // keeps the louder mix from clipping
+  comp.threshold.value = -14; comp.ratio.value = 4;
+  master.connect(comp); comp.connect(ctx.destination);
+  sfxBus = ctx.createGain(); sfxBus.gain.value = 1.7; sfxBus.connect(master);
+  musBus = ctx.createGain(); musBus.gain.value = state.musicOn ? MUSIC_VOL : 0; musBus.connect(master);
 
   // gentle echo for atmosphere
   const dly = ctx.createDelay(1); dly.delayTime.value = 0.375;
@@ -138,6 +143,23 @@ function applyMood(instant = false) {
   });
 }
 
+// iPhones mute Web Audio when the ring/silent switch is on, unless the page is also
+// playing a real media element. A looping silent clip flips it to the media channel.
+function keepAlive() {
+  try { if (navigator.audioSession) navigator.audioSession.type = 'playback'; } catch { /* unsupported */ }
+  if (silentEl) { if (silentEl.paused) silentEl.play().catch(() => {}); return; }
+  try {
+    const n = 800, rate = 8000, b = new Uint8Array(44 + n);
+    const dv = new DataView(b.buffer), w = (o, s) => { for (let i = 0; i < s.length; i++) dv.setUint8(o + i, s.charCodeAt(i)); };
+    w(0, 'RIFF'); dv.setUint32(4, 36 + n, true); w(8, 'WAVEfmt '); dv.setUint32(16, 16, true); dv.setUint16(20, 1, true);
+    dv.setUint16(22, 1, true); dv.setUint32(24, rate, true); dv.setUint32(28, rate, true); dv.setUint16(32, 1, true);
+    dv.setUint16(34, 8, true); w(36, 'data'); dv.setUint32(40, n, true); b.fill(128, 44);
+    silentEl = new Audio(URL.createObjectURL(new Blob([b], { type: 'audio/wav' })));
+    silentEl.loop = true; silentEl.volume = 0.01; silentEl.setAttribute('playsinline', '');
+    silentEl.play().catch(() => {});
+  } catch { /* ignore */ }
+}
+
 function startLoop() {
   if (timer) return;
   timer = setInterval(scheduler, 90);
@@ -147,17 +169,20 @@ function startLoop() {
 export const music = {
   // must be called from a user gesture the first time (browser autoplay rules)
   unlock() {
-    if (!ensure()) return;
-    if (ctx.state === 'suspended') ctx.resume();
+    if (!ensure()) return false;
+    keepAlive();
+    if (ctx.state !== 'running') ctx.resume().catch(() => {});
     startLoop();
+    return ctx.state === 'running';
   },
+  get running() { return !!ctx && ctx.state === 'running'; },
   setMood(m) {
     if (m === mood) return;
     mood = m; applyMood();
   },
   setMusic(on) {
     state.musicOn = on;
-    if (ctx) musBus.gain.setTargetAtTime(on ? 0.55 : 0, ctx.currentTime, 0.15);
+    if (ctx) musBus.gain.setTargetAtTime(on ? MUSIC_VOL : 0, ctx.currentTime, 0.15);
     if (on) this.unlock();
   },
   setSfx(on) { state.sfxOn = on; },
@@ -170,7 +195,8 @@ export const music = {
 function sfxReady() {
   if (!state.sfxOn || !AC) return false;
   if (!ensure()) return false;
-  if (ctx.state === 'suspended') ctx.resume();
+  keepAlive();
+  if (ctx.state !== 'running') ctx.resume().catch(() => {});
   return true;
 }
 const now = () => ctx.currentTime + 0.005;
