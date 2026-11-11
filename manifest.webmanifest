@@ -1,0 +1,16 @@
+{
+  "name": "Red Dot — A Southeast Asian Brinkmanship Game",
+  "short_name": "Red Dot",
+  "description": "A tense 10-minute strategy game. Steer a small island through a crowded neighbourhood.",
+  "start_url": "./",
+  "scope": "./",
+  "display": "standalone",
+  "orientation": "any",
+  "background_color": "#050d18",
+  "theme_color": "#06101c",
+  "icons": [
+    { "src": "icons/icon-192.png", "sizes": "192x192", "type": "image/png" },
+    { "src": "icons/icon-512.png", "sizes": "512x512", "type": "image/png" },
+    { "src": "icons/icon-512.png", "sizes": "512x512", "type": "image/png", "purpose": "maskable" }
+  ]
+}

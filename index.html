@@ -1,0 +1,39 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,viewport-fit=cover">
+<meta name="theme-color" content="#06101c">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="apple-mobile-web-app-title" content="Red Dot">
+<meta name="description" content="Red Dot: a tense 10-minute brinkmanship game. Steer a small island through a crowded neighbourhood.">
+<link rel="manifest" href="manifest.webmanifest">
+<link rel="apple-touch-icon" href="icons/apple-touch-icon.png">
+<link rel="icon" href="icons/icon-192.png">
+<title>Red Dot — A Southeast Asian Brinkmanship Game</title>
+<link rel="stylesheet" href="css/style.css">
+</head>
+<body>
+<div id="app">
+  <header id="hud"></header>
+  <main id="main">
+    <section id="mapwrap" aria-label="Regional radar">
+      <svg id="map" viewBox="0 0 100 100" preserveAspectRatio="xMidYMid meet" role="img" aria-label="Radar map of Singapore and its neighbours"></svg>
+      <div id="hint"></div>
+      <div id="toast" aria-live="polite"></div>
+    </section>
+    <section id="panel">
+      <div id="target"></div>
+      <nav id="tabs" role="tablist"></nav>
+      <div id="body"></div>
+    </section>
+  </main>
+  <footer id="dock"></footer>
+</div>
+<div id="sheet" aria-live="polite"></div>
+<noscript>Red Dot needs JavaScript enabled.</noscript>
+<script type="module" src="js/main.js"></script>
+</body>
+</html>

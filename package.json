@@ -1,0 +1,10 @@
+{
+  "name": "red-dot",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "sim": "node tests/sim.mjs",
+    "serve": "python3 -m http.server 8080"
+  }
+}
