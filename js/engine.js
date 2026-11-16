@@ -1,5 +1,5 @@
 // Pure game logic. No DOM. Mutates a state object `s`; the UI renders from it.
-import { NATIONS, POWERS, ACTIONS, CRISES, H, clamp, leaderBonus } from './data.js';
+import { NATIONS, POWERS, ACTIONS, CRISES, H, clamp, leaderBonus, LEADERS, FEUDS } from './data.js';
 import { UNITS, unitById, START_FORCES, START_PURCH, POLITICS, SUPPLIERS, powers, syncDet, upkeep, effMe, effFoe, foeFactor } from './forces.js';
 
 export const MAX_TURN = 20;
@@ -26,7 +26,12 @@ export function serialize(s) {
 }
 export function restore(json) {
   const { rngState, ...rest } = JSON.parse(json);
-  return { ...rest, rand: mulberry32(rngState) };
+  const s = { ...rest, rand: mulberry32(rngState) };
+  // saves from older versions
+  if (!s.feuds) { s.feuds = {}; for (const [k, f] of Object.entries(FEUDS)) s.feuds[k] = { t: f.base, war: 0 }; }
+  if (!s.pendingMediate) s.pendingMediate = [];
+  for (const [c, n] of Object.entries(s.nations)) { if (n.unrest == null) n.unrest = NATIONS[c].unrest; if (n.covert == null) n.covert = 0; }
+  return s;
 }
 
 // ---------- story log (for the end-of-term debrief) ----------
@@ -68,7 +73,7 @@ export function newGame(seed = Math.floor(Math.random() * 2147483646) + 1) {
   const rand = mulberry32(seed);
   const jit = () => Math.round((rand() - 0.5) * 10);
   const s = {
-    seed, rand, turn: 1, ap: AP_PER_TURN, money: 60,
+    seed, rand, turn: 1, ap: AP_PER_TURN, money: 70,
     g: { stab: 60, det: 40, hub: 50, res: 55 },
     powers: { US: { rel: 50 }, CN: { rel: 50 } },
     nations: {}, crises: [], cd: {}, shield: 0, uid: 1, lastDet: 40,
@@ -77,8 +82,10 @@ export function newGame(seed = Math.floor(Math.random() * 2147483646) + 1) {
     arms: 0, posture: 0, war: null, pendingWar: null, supplyHits: 0, log: [], hist: [],
   };
   for (const [c, n] of Object.entries(NATIONS)) {
-    s.nations[c] = { rel: clamp(n.rel + jit()), heat: clamp(n.heat + jit()), intent: 'distracted', scout: 0, mil: { ...n.mil } };
+    s.nations[c] = { rel: clamp(n.rel + jit()), heat: clamp(n.heat + jit()), intent: 'distracted', scout: 0, mil: { ...n.mil }, leader: { ...LEADERS[c] }, unrest: n.unrest, covert: 0 };
   }
+  s.feuds = {}; s.pendingMediate = [];
+  for (const [k, f] of Object.entries(FEUDS)) s.feuds[k] = { t: clamp(f.base + jit()), war: 0 };
   s.baseUpkeep = upkeep(s);
   syncDet(s);
   s.lastDet = s.g.det;
@@ -92,7 +99,7 @@ export const nm = (code) => (NATIONS[code] || POWERS[code]).name;
 export function income(s) {
   const rels = Object.values(s.nations).map((n) => n.rel);
   const avg = rels.reduce((a, b) => a + b, 0) / rels.length;
-  return Math.round(2 + s.g.hub * 0.1 + (avg - 50) * 0.1 + (s.powers.CN.rel > 60 ? 2 : 0) - (upkeep(s) - s.baseUpkeep));
+  return Math.round(5 + s.g.hub * 0.12 + (avg - 50) * 0.12 + (s.powers.CN.rel > 60 ? 2 : 0) - (upkeep(s) - s.baseUpkeep));
 }
 
 export function turnLabel(s) {
@@ -119,8 +126,11 @@ export function doAction(s, id, target) {
   const st = actionState(s, a, target);
   if (!st.ok) return st;
   s.ap -= a.ap; s.money -= a.cost;
-  a.fx(s, target);
-  const note = leaderBonus(s, id, target);
+  const r = a.fx(s, target);
+  let note = '';
+  if (typeof r === 'string') note = r;
+  else if (r && r.note) { note = r.note; if (r.log) logEv(s, r.log.text, r.log.w, r.log.tone); }
+  else note = leaderBonus(s, id, target);
   if (a.cd) s.cd[id] = a.cd;
   flushWar(s);
   checkOver(s);
@@ -153,7 +163,7 @@ export function crisisOptions(s, c) {
       const p = brinkChance(s, c, o);
       brink = { p, known, lo: Math.max(5, Math.round((p - 15) / 5) * 5), hi: Math.min(95, Math.round((p + 15) / 5) * 5) };
     }
-    return { i, label: o.label, sub: o.sub, ap: o.ap, cost: o.cost, free: !!o.free, ok, reason, brink };
+    return { i, label: typeof o.label === 'function' ? o.label(s, c) : o.label, sub: o.sub, ap: o.ap, cost: o.cost, free: !!o.free, ok, reason, brink };
   });
 }
 
@@ -171,7 +181,7 @@ export function resolveCrisis(s, uid, i) {
     kind = s.rand() * 100 < p ? 'win' : 'lose';
     (kind === 'win' ? o.win : o.lose)(s, c);
     text = kind === 'win' ? (o.w || 'It worked.') : (o.l || 'It backfired.');
-    logEv(s, `${kind === 'win' ? 'Gamble paid off' : 'Gamble failed'} (${p}%): ${o.label} — ${t.title(nm(c.nation))}. ${text}`, kind === 'win' ? 40 + (100 - p) / 4 : 55 + p / 4, kind === 'win' ? 'good' : 'bad');
+    logEv(s, `${kind === 'win' ? 'Gamble paid off' : 'Gamble failed'} (${p}%): ${typeof o.label === 'function' ? o.label(s, c) : o.label} — ${t.title(nm(c.nation), c)}. ${text}`, kind === 'win' ? 40 + (100 - p) / 4 : 55 + p / 4, kind === 'win' ? 'good' : 'bad');
   } else {
     o.fx(s, c);
   }
@@ -180,12 +190,12 @@ export function resolveCrisis(s, uid, i) {
   else if (!o.free && !t.opp) s.stats.resolved++;
   flushWar(s);
   checkOver(s);
-  return { ok: true, kind, text, label: o.label, title: t.title(nm(c.nation)) };
+  return { ok: true, kind, text, label: typeof o.label === 'function' ? o.label(s, c) : o.label, title: t.title(nm(c.nation), c) };
 }
 
-function addCrisis(s, tplId, nation) {
+function addCrisis(s, tplId, nation, extra = {}) {
   const t = CRISES[tplId];
-  const c = { uid: s.uid++, tpl: tplId, nation, timer: t.timer, max: t.timer };
+  const c = { uid: s.uid++, tpl: tplId, nation, timer: t.timer, max: t.timer, ...extra };
   if (t.onSpawn) t.onSpawn(s, c);
   s.crises.push(c);
   return c;
@@ -194,21 +204,27 @@ function addCrisis(s, tplId, nation) {
 function spawnCrises(s) {
   const out = [];
   const r = s.rand;
+  for (const m of (s.pendingMediate || [])) {
+    if (s.crises.length < 6 && !s.crises.some((c) => c.tpl === 'mediate' && c.key === m.key)) out.push(addCrisis(s, 'mediate', m.a, { other: m.b, key: m.key }));
+  }
+  s.pendingMediate = [];
   for (const [code, n] of Object.entries(s.nations)) {
     if (n.heat >= 75 && !s.crises.some((c) => c.tpl === 'ultimatum' && c.nation === code)) {
       out.push(addCrisis(s, 'ultimatum', code));
     }
   }
-  let count = 1 + (r() < 0.8 ? 1 : 0) + (s.turn > 4 && r() < 0.65 ? 1 : 0);
+  let count = 1 + (r() < 0.55 ? 1 : 0) + (s.turn > 5 && r() < 0.4 ? 1 : 0);
   if (s.turn === 1) count = Math.max(count, 2);
-  for (let k = 0; k < count && s.crises.length < 6; k++) {
+  for (let k = 0; k < count && s.crises.length < 5; k++) {
     const imb = Math.abs(s.powers.US.rel - s.powers.CN.rel);
     let subject;
     if (r() < (imb > 30 ? 0.35 : 0.12)) subject = weightedPick(r, ['US', 'CN'], (c) => s.powers[c].rel);
     else {
       subject = weightedPick(r, Object.keys(s.nations), (c) => {
         const n = s.nations[c];
-        return n.heat + 15 + { hawkish: 15, opportunist: 8, distracted: 5, friendly: 0 }[n.intent];
+        // Malaysia and Indonesia are the natural rivals; the others have bigger worries of their own
+        const geo = { MY: 1.5, ID: 1.5, BN: 0.5, TH: 0.8, VN: 0.6, KH: 0.5, LA: 0.6, MM: 0.5 }[c] || 1;
+        return (n.heat + 15 + { hawkish: 15, opportunist: 8, distracted: 5, friendly: 0 }[n.intent]) * geo;
       });
     }
     const wantOpp = r() < 0.2;
@@ -254,6 +270,46 @@ function attackWill(s, code) {
   return clamp(0.9 * sum(e) / Math.max(1, sum(m)), 0.3, 1);
 }
 
+// ---------- the neighbours' own quarrels ----------
+function stepFeuds(s, ev) {
+  const atWar = () => Object.values(s.feuds).filter((f) => f.war > 0).length;
+  for (const [key, f] of Object.entries(s.feuds)) {
+    const def = FEUDS[key], A = def.a, B = def.b, na = s.nations[A], nb = s.nations[B];
+    const both = `${nm(A)} and ${nm(B)}`;
+    if (f.war > 0) {
+      f.war--;
+      for (const c of [A, B]) {
+        const n = s.nations[c], doms = ['land', 'air', 'sea'].filter((d) => n.mil[d] > 0);
+        if (doms.length) { const d = doms[Math.floor(s.rand() * doms.length)]; n.mil[d] = Math.max(0, n.mil[d] - (3 + s.rand() * 3)); }
+        H.heat(s, c, -4); n.intent = 'distracted';
+      }
+      H.g(s, 'hub', -1);
+      if (f.war <= 0) { f.t = clamp(def.base + 15); ev.push({ kind: 'news', text: `Ceasefire between ${both}. Both armies are depleted.` }); }
+      else ev.push({ kind: 'news', text: `${both} are still fighting. Regional trade is disrupted (Hub −1).` });
+      continue;
+    }
+    let step = Math.round(s.rand() * 12 - 5) + Math.round((def.base - f.t) * 0.08);
+    if (s.rand() < 0.07) step += 14; // an incident: a shooting, a seizure, a speech
+    if (na.intent === 'hawkish' || nb.intent === 'hawkish') step += 2;
+    if (na.unrest > 55 || nb.unrest > 55) step += 2; // regimes under pressure pick fights abroad
+    f.t = clamp(f.t + step);
+    const mediate = (p) => { if (s.rand() < p && !s.crises.some((c) => c.tpl === 'mediate' && c.key === key) && !s.pendingMediate.some((m) => m.key === key)) s.pendingMediate.push({ key, a: A, b: B }); };
+    if (f.t >= 85 && atWar() < 2 && s.rand() < 0.5) {
+      f.war = 3 + Math.floor(s.rand() * 3);
+      ev.push({ kind: 'news', text: `WAR: ${both} are fighting over ${def.why}.` });
+      logEv(s, `${both} went to war over ${def.why}.`, 35, 'dim');
+      mediate(0.85);
+    } else if (f.t >= 66 && s.rand() < 0.5) {
+      f.t = clamp(f.t + 6);
+      for (const n of [na, nb]) for (const d of ['land', 'air', 'sea']) n.mil[d] = Math.max(0, n.mil[d] - 1.5);
+      ev.push({ kind: 'news', text: `Clash on the ${nm(A)}–${nm(B)} frontier over ${def.why}.` });
+      mediate(0.5);
+    } else if (f.t >= 55 && s.rand() < 0.3) {
+      ev.push({ kind: 'news', text: `${both} trade sharp words over ${def.why}.` });
+    }
+  }
+}
+
 export function endTurn(s) {
   if (s.war) return { events: [], created: [], over: null };
   const ev = [];
@@ -266,8 +322,8 @@ export function endTurn(s) {
       const t = CRISES[c.tpl];
       const txt = t.erupt(s, c);
       s.crises = s.crises.filter((x) => x !== c);
-      if (!t.opp) { s.stats.erupted++; logEv(s, `${t.title(nm(c.nation))} was ignored: ${txt}`, 45); }
-      ev.push({ kind: t.opp ? 'info' : 'erupt', text: `${t.title(nm(c.nation))}: ${txt}` });
+      if (!t.opp) { s.stats.erupted++; logEv(s, `${t.title(nm(c.nation), c)} was ignored: ${txt}`, 45); }
+      ev.push({ kind: t.opp ? 'info' : 'erupt', text: `${t.title(nm(c.nation), c)}: ${txt}` });
     }
   }
 
@@ -304,10 +360,22 @@ export function endTurn(s) {
     const grow = { friendly: 0.2, opportunist: 0.6, hawkish: 1.0, distracted: 0.3 }[n.intent] * 1.6 * (0.7 + s.rand() * 0.6);
     for (const d of ['land', 'air', 'sea']) if (n.mil[d] > 0) n.mil[d] += grow;
     if (n.heat >= 96 && hos && !s.war && !s.pendingWar && s.rand() < attackWill(s, code)) H.war(s, code, { aggressor: false, start: -15, reason: 'attack' });
-    n.rel = clamp(n.rel + (n.rel > 55 ? -1 : n.rel < 45 ? 1 : 0));
+    const home = NATIONS[code].home;
+    n.rel = clamp(n.rel + (n.rel > home + 5 ? -1 : n.rel < home - 5 ? 1 : 0));
+    // domestic unrest settles back; a regime under pressure looks inward
+    const ub = NATIONS[code].unrest, ud = ub - (n.unrest || 0);
+    if (Math.abs(ud) >= 3) n.unrest = clamp((n.unrest || 0) + Math.sign(ud) * Math.ceil(Math.abs(ud) * 0.1));
+    if (n.unrest > 55) H.heat(s, code, -2);
+    if (n.covert > 0 && s.rand() < 0.04 * n.covert) {
+      H.rel(s, code, -12); H.heat(s, code, 10); n.covert = Math.max(0, n.covert - 1);
+      ev.push({ kind: 'erupt', text: `${nm(code)} uncovers Singapore's hand behind its opposition. Trust −12.` });
+      logEv(s, `${nm(code)} uncovered Singapore's covert backing of its opposition.`, 65);
+    }
     if (n.scout > 0) n.scout--;
     if (s.rand() < 0.12) n.intent = pickIntent(s, code);
   }
+
+  stepFeuds(s, ev);
 
   // 4) money
   const inc = income(s);
@@ -359,7 +427,7 @@ export function score(s, survived = true) {
   ];
   const total = parts.reduce((a, [, v]) => a + v, 0);
   let rank = 'Fallen';
-  if (survived) rank = total >= 290 ? 'Architect of the Age' : total >= 230 ? 'Steady Hand' : total >= 170 ? 'Survivor' : 'Barely Standing';
+  if (survived) rank = total >= 380 ? 'Architect of the Age' : total >= 300 ? 'Steady Hand' : total >= 220 ? 'Survivor' : 'Barely Standing';
   return { total, parts, rank };
 }
 
@@ -417,10 +485,10 @@ export function buyUnit(s, id) {
 // ---------- war ----------
 
 export const WAR_OPS = [
-  { id: 'air',   name: 'Air Campaign',      dom: 'air',  cost: 4, desc: 'Fight for the skies. Air superiority boosts land and sea operations.' },
-  { id: 'sea',   name: 'Sea Control',       dom: 'sea',  cost: 4, desc: 'Secure the Strait. Protects Resilience and Hub.' },
-  { id: 'land',  name: 'Land Offensive',    dom: 'land', cost: 5, desc: 'Take the objective on the ground. Big swing either way.' },
-  { id: 'strike', name: 'Precision Strikes', dom: 'mix', cost: 6, desc: 'Stand-off missiles wear down all enemy forces. Low risk, modest gains.' },
+  { id: 'air',   name: 'Air Campaign',      dom: 'air',  cost: 0, desc: 'Fight for the skies. Air superiority boosts land and sea operations.' },
+  { id: 'sea',   name: 'Sea Control',       dom: 'sea',  cost: 0, desc: 'Secure the Strait. Protects Resilience and Hub.' },
+  { id: 'land',  name: 'Land Offensive',    dom: 'land', cost: 0, desc: 'Take the objective on the ground. Big swing either way.' },
+  { id: 'strike', name: 'Precision Strikes', dom: 'mix', cost: 0, desc: 'Stand-off missiles wear down all enemy forces. Low risk, modest gains.' },
   { id: 'ceasefire', name: 'Seek Ceasefire', dom: 'none', cost: 0, desc: 'Negotiate an end. Far easier when you are ahead.' },
 ];
 

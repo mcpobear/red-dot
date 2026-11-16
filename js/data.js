@@ -10,7 +10,7 @@ export const H = {
   // Deterrence is derived from forces; events nudge a short-lived "posture" that fades each turn.
   g: (s, k, d) => {
     if (k === 'det') { s.posture = clamp((s.posture || 0) + d, -40, 40); syncDet(s); }
-    else { if (k === 'stab' && d < 0) d = Math.min(-1, Math.round(d * 0.8)); s.g[k] = clamp(s.g[k] + d); }
+    else { if (k === 'stab' && d < 0) d = Math.min(-1, Math.round(d * 0.9)); s.g[k] = clamp(s.g[k] + d); }
   },
   war: (s, foe, opts) => { if (!s.war && !s.pendingWar) s.pendingWar = { foe, ...opts }; },
   rel: (s, c, d) => { const o = s.nations[c] || s.powers[c]; if (o) o.rel = clamp(o.rel + d); },
@@ -27,30 +27,38 @@ export const INTENTS = {
 
 // a = bearing from Singapore (deg, clockwise from north), r = radar distance (map units)
 export const NATIONS = {
-  MY: { name: 'Malaysia',  a: 0,   r: 14, sz: 6.2, rel: 55, heat: 30, lev: 'Water, the Causeway, shared history',
+  MY: { name: 'Malaysia',  a: 0,   r: 14, sz: 6.2, rel: 52, heat: 34, lev: 'Water, the Causeway, shared history',
+        home: 52, unrest: 15,
         mil: { land: 55, air: 42, sea: 42 },
-        bias: { friendly: .30, opportunist: .30, hawkish: .10, distracted: .30 } },
-  ID: { name: 'Indonesia', a: 200, r: 16, sz: 6.6, rel: 55, heat: 30, lev: 'Haze, straits and airspace',
+        bias: { friendly: .20, opportunist: .33, hawkish: .20, distracted: .27 } },
+  ID: { name: 'Indonesia', a: 200, r: 16, sz: 6.6, rel: 52, heat: 32, lev: 'Haze, straits and airspace',
+        home: 52, unrest: 15,
         mil: { land: 85, air: 60, sea: 70 },
-        bias: { friendly: .30, opportunist: .30, hawkish: .15, distracted: .25 } },
-  BN: { name: 'Brunei',    a: 80,  r: 32, sz: 4.8, rel: 65, heat: 10, lev: 'Quiet, wealthy, steady',
+        bias: { friendly: .20, opportunist: .33, hawkish: .20, distracted: .27 } },
+  BN: { name: 'Brunei',    a: 80,  r: 32, sz: 4.8, rel: 68, heat: 8, lev: 'Quiet, wealthy, steady',
+        home: 68, unrest: 5,
         mil: { land: 12, air: 10, sea: 10 },
-        bias: { friendly: .60, opportunist: .20, hawkish: .05, distracted: .15 } },
-  TH: { name: 'Thailand',  a: 325, r: 30, sz: 5.4, rel: 60, heat: 20, lev: 'Land-bridge dreams, shaky politics',
+        bias: { friendly: .68, opportunist: .12, hawkish: .02, distracted: .18 } },
+  TH: { name: 'Thailand',  a: 325, r: 30, sz: 5.4, rel: 60, heat: 15, lev: 'Land-bridge dreams, shaky politics',
+        home: 60, unrest: 35,
         mil: { land: 65, air: 55, sea: 45 },
-        bias: { friendly: .30, opportunist: .25, hawkish: .10, distracted: .35 } },
-  VN: { name: 'Vietnam',   a: 45,  r: 30, sz: 5.4, rel: 55, heat: 25, lev: 'Rising rival hub, South China Sea',
+        bias: { friendly: .40, opportunist: .18, hawkish: .05, distracted: .37 } },
+  VN: { name: 'Vietnam',   a: 45,  r: 30, sz: 5.4, rel: 64, heat: 10, lev: 'Rising rival hub, South China Sea',
+        home: 64, unrest: 10,
         mil: { land: 70, air: 50, sea: 50 },
-        bias: { friendly: .25, opportunist: .35, hawkish: .20, distracted: .20 } },
-  KH: { name: 'Cambodia',  a: 20,  r: 32, sz: 4.8, rel: 50, heat: 25, lev: 'Beijing-leaning, scam compounds',
+        bias: { friendly: .58, opportunist: .17, hawkish: .04, distracted: .21 } },
+  KH: { name: 'Cambodia',  a: 20,  r: 32, sz: 4.8, rel: 50, heat: 12, lev: 'Beijing-leaning, scam compounds',
+        home: 50, unrest: 22,
         mil: { land: 35, air: 12, sea: 10 },
-        bias: { friendly: .25, opportunist: .35, hawkish: .15, distracted: .25 } },
-  LA: { name: 'Laos',      a: 350, r: 42, sz: 4.6, rel: 50, heat: 15, lev: 'Hydropower and the regional grid',
+        bias: { friendly: .22, opportunist: .17, hawkish: .04, distracted: .57 } },
+  LA: { name: 'Laos',      a: 350, r: 42, sz: 4.6, rel: 55, heat: 10, lev: 'Hydropower and the regional grid',
+        home: 55, unrest: 15,
         mil: { land: 28, air: 6, sea: 0 },
-        bias: { friendly: .35, opportunist: .25, hawkish: .10, distracted: .30 } },
-  MM: { name: 'Myanmar',   a: 300, r: 42, sz: 5.2, rel: 40, heat: 35, lev: 'Instability, refugees, scam hubs',
+        bias: { friendly: .50, opportunist: .12, hawkish: .03, distracted: .35 } },
+  MM: { name: 'Myanmar',   a: 300, r: 42, sz: 5.2, rel: 45, heat: 12, lev: 'Instability, refugees, scam hubs',
+        home: 46, unrest: 62,
         mil: { land: 60, air: 32, sea: 20 },
-        bias: { friendly: .15, opportunist: .30, hawkish: .25, distracted: .30 } },
+        bias: { friendly: .20, opportunist: .16, hawkish: .04, distracted: .60 } },
 };
 
 export const POWERS = {
@@ -76,11 +84,79 @@ export const LEADERS = {
   LA: { name: 'President Keomany',     style: 'dealer',    quip: 'Wants power lines, not problems.' },
   MM: { name: 'Gen. Min Thura',        style: 'hardliner', quip: 'Rules by the barrel and trusts nobody.' },
 };
-export const leaderName = (c) => (LEADERS[c] ? LEADERS[c].name : '');
+// A leader can change (regime change), so the live one is stored on the nation.
+export const leaderOf = (s, c) => (s && s.nations && s.nations[c] && s.nations[c].leader) || LEADERS[c];
+export const leaderName = (c, s) => { const L = leaderOf(s, c); return L ? L.name : ''; };
+
+// Who might replace a regime that falls: a reformer who warms to Singapore, or a hardliner who does not.
+export const REGIMES = {
+  MY: { reformer: { name: 'PM Aisha Rahman', style: 'charmer', quip: 'A reformer who wants investors and quiet borders.' },
+        strongman: { name: 'PM Zulkifli Hadi', style: 'hardliner', quip: 'Rose on grievance politics. Water is a lever to him.' } },
+  ID: { reformer: { name: 'President Dewi Santoso', style: 'dealer', quip: 'A technocrat who wants the straits calm and trade flowing.' },
+        strongman: { name: 'President Jati', style: 'hardliner', quip: 'A nationalist who counts every ship in the strait.' } },
+  BN: { reformer: { name: 'Sultan Hafiz', style: 'charmer', quip: 'Younger, outward-looking, fond of Singapore.' },
+        strongman: { name: 'Regent Pengiran Ali', style: 'proud', quip: 'Guards the palace and its pride.' } },
+  TH: { reformer: { name: 'PM Napat Srisai', style: 'charmer', quip: 'An elected reformer, popular and cautious.' },
+        strongman: { name: 'Gen. Chatchai', style: 'hardliner', quip: 'Seized power "temporarily". Trusts the barracks.' } },
+  VN: { reformer: { name: 'Gen. Sec. Lan Anh', style: 'dealer', quip: 'Wants the southern factories humming and the Strait calm.' },
+        strongman: { name: 'Gen. Sec. Truong', style: 'hardliner', quip: 'Sees every neighbour as a rival hub.' } },
+  KH: { reformer: { name: 'PM Vanna', style: 'dealer', quip: 'Wants clean investment and a seat at the table.' },
+        strongman: { name: 'PM Sok Heng', style: 'proud', quip: 'Leans on Beijing and bristles at lectures.' } },
+  LA: { reformer: { name: 'President Souk', style: 'dealer', quip: 'Sells power and wants more buyers.' },
+        strongman: { name: 'President Khamla', style: 'hardliner', quip: 'Closes ranks, closes borders.' } },
+  MM: { reformer: { name: 'President Thida', style: 'charmer', quip: 'A civilian caretaker. Fragile, but she wants friends.' },
+        strongman: { name: 'Gen. Aung Kyaw', style: 'hardliner', quip: 'A harder general who trusts nobody.' } },
+};
+
+// Disputes between the neighbours themselves. 'base' is the resting tension.
+export const FEUDS = {
+  'MM-TH': { a: 'MM', b: 'TH', base: 45, why: 'border fighting and refugees' },
+  'KH-TH': { a: 'KH', b: 'TH', base: 50, why: 'a disputed border' },
+  'MY-ID': { a: 'MY', b: 'ID', base: 35, why: 'maritime borders' },
+  'MY-TH': { a: 'MY', b: 'TH', base: 25, why: 'the southern border' },
+  'MY-BN': { a: 'MY', b: 'BN', base: 18, why: 'offshore claims' },
+  'VN-KH': { a: 'VN', b: 'KH', base: 28, why: 'old suspicions' },
+  'LA-TH': { a: 'LA', b: 'TH', base: 18, why: 'river and trade disputes' },
+  'ID-VN': { a: 'ID', b: 'VN', base: 20, why: 'fishing waters in the South China Sea' },
+};
+export const feudKey = (a, b) => (FEUDS[`${a}-${b}`] ? `${a}-${b}` : FEUDS[`${b}-${a}`] ? `${b}-${a}` : null);
+
+// Covert support for opposition factions. Success raises unrest; enough unrest topples the regime,
+// which can bring in a reformer or a hardliner. Exposure wrecks trust.
+function regimeChange(s, t) {
+  const n = s.nations[t], R = REGIMES[t], old = leaderName(t, s);
+  const reformer = s.rand() < (n.rel >= 50 ? 0.55 : 0.45);
+  n.leader = { ...(reformer ? R.reformer : R.strongman) };
+  n.unrest = 30;
+  if (reformer) { H.rel(s, t, 15); n.heat = clamp(n.heat - 20); n.intent = 'friendly'; }
+  else { H.rel(s, t, -15); n.heat = clamp(n.heat + 12); n.intent = 'hawkish'; }
+  for (const k of Object.keys(s.nations)) if (k !== t) H.rel(s, k, -2);
+  const txt = reformer
+    ? `${old} falls. ${n.leader.name} takes over and wants better ties with Singapore.`
+    : `${old} falls. ${n.leader.name} takes over and is colder to Singapore.`;
+  return { note: txt, log: { text: `Regime change in ${NATIONS[t].name}: ${txt}`, w: 95, tone: reformer ? 'good' : 'bad' } };
+}
+function covertOp(s, t) {
+  const n = s.nations[t], L = leaderOf(s, t), nm = NATIONS[t].name;
+  const prior = n.covert || 0;
+  const p = clamp(55 + (n.scout > 0 ? 10 : 0) - (L.style === 'hardliner' ? 12 : 0) - prior * 6, 25, 85);
+  n.covert = prior + 1;
+  if (s.rand() * 100 < p) {
+    const gain = 14 + Math.floor(s.rand() * 10);
+    n.unrest = clamp((n.unrest || 0) + gain);
+    H.heat(s, t, -8);
+    if (n.unrest >= 75) return regimeChange(s, t);
+    return `Your network takes root in ${nm}: unrest +${gain}, and their attention turns inward.`;
+  }
+  H.rel(s, t, -20); H.heat(s, t, 15); H.g(s, 'stab', -2);
+  for (const k of Object.keys(s.nations)) if (k !== t) H.rel(s, k, -2);
+  return { note: `Exposed! ${nm} accuses Singapore of meddling. Trust collapses.`, log: { text: `Your covert network in ${nm} was exposed.`, w: 70, tone: 'bad' } };
+}
+
 
 // Called after an action resolves. Returns a short note if the leader's style mattered.
 export function leaderBonus(s, id, t) {
-  const L = LEADERS[t]; if (!L || !s.nations[t]) return '';
+  const L = leaderOf(s, t); if (!L || !s.nations[t]) return '';
   const st = L.style;
   if (id === 'visit' && st === 'charmer') { H.rel(s, t, 4); return `${L.name} loves the pageantry: +4 trust`; }
   if (id === 'visit' && st === 'hardliner') { H.rel(s, t, -3); return `${L.name} is unmoved by ceremony: −3 trust`; }
@@ -121,6 +197,9 @@ export const ACTIONS = [
   { id: 'scout', cat: 'int', tgt: 'nation', ap: 1, cost: 1, name: 'Scout Intentions',
     desc: 'Reveals hidden intent and exact odds against this nation for 6 turns.',
     fx: (s, t) => { s.nations[t].scout = 6; } },
+  { id: 'covert', cat: 'int', tgt: 'nation', ap: 1, cost: 8, name: 'Back Opposition Factions',
+    desc: 'Covertly back the regime\'s rivals. Unrest rises and they look inward. Push far enough and the government falls, bringing a reformer or a hardliner. Odds fall each time you try; get caught and trust collapses.',
+    fx: (s, t) => covertOp(s, t) },
   { id: 'counter', cat: 'int', tgt: null, ap: 1, cost: 4, name: 'Counter-Espionage',
     desc: 'Blocks cyber incidents for 4 turns.',
     fx: (s) => { s.shield = 4; } },
@@ -135,7 +214,7 @@ export const ACTIONS = [
       if (hostile(n)) n.heat = clamp(n.heat - 10);
       else { n.heat = clamp(n.heat + 8); H.rel(s, t, -8); }
     } },
-  { id: 'war', cat: 'def', tgt: 'nation', ap: 1, cost: 5, name: 'Go to War',
+  { id: 'war', cat: 'def', tgt: 'nation', ap: 1, cost: 0, name: 'Go to War',
     desc: 'Open hostilities. You will see a force comparison first. Neighbours will not forget it.',
     fx: (s, t) => { H.war(s, t, { aggressor: true, start: 5, reason: 'strike' }); } },
 ];
@@ -151,7 +230,7 @@ export const CRISES = {
     text: () => 'Peatland fires in Sumatra blanket the island in smoke. Schools close and voters grumble.',
     erupt: (s) => { H.g(s, 'stab', -10); H.rel(s, 'ID', -4); return 'Smoke settles in. Stability −10.'; },
     options: [
-      { label: 'Fund fire-fighting aid', sub: 'Costly, earns goodwill', ap: 1, cost: 8,
+      { label: 'Fund fire-fighting aid', sub: 'Costly, earns goodwill', ap: 1, cost: 6,
         fx: (s, c) => { H.rel(s, c.nation, 8); H.g(s, 'stab', 3); H.heat(s, c.nation, -5); } },
       { label: 'Press Jakarta publicly', sub: 'Could land, could sour ties', ap: 1, cost: 0, brink: true,
         w: 'Jakarta commits to action.', l: 'Jakarta bristles at the lecture.',
@@ -167,15 +246,15 @@ export const CRISES = {
     text: () => 'Johor wants a steep rise for raw water. The agreement clock is ticking.',
     erupt: (s) => { H.g(s, 'res', -10); H.heat(s, 'MY', 8); return 'Johor tightens the tap. Resilience −10.'; },
     options: [
-      { label: 'Pay the premium', sub: 'Buys calm and a little supply', ap: 1, cost: 10,
+      { label: 'Pay the premium', sub: 'Buys calm and a little supply', ap: 1, cost: 8,
         fx: (s, c) => { H.rel(s, c.nation, 6); H.heat(s, c.nation, -8); H.g(s, 'res', 2); } },
       { label: 'Stand firm', sub: 'Call their bluff', ap: 1, cost: 0, brink: true,
         w: 'They blink first.', l: 'They cut the flow to prove a point.',
         win: (s, c) => { H.rel(s, c.nation, 2); H.heat(s, c.nation, -6); H.g(s, 'hub', 3); },
         lose: (s, c) => { H.g(s, 'res', -12); H.rel(s, c.nation, -10); H.heat(s, c.nation, 12); } },
-      { label: 'Secure the pumping stations', sub: 'Opens a war with Malaysia', ap: 1, cost: 5,
+      { label: 'Secure the pumping stations', sub: 'Opens a war with Malaysia', ap: 1, cost: 0,
         fx: (s, c) => { H.war(s, c.nation, { aggressor: true, start: 5, reason: 'supply' }); } },
-      { label: 'Accelerate NEWater', sub: 'Long-term answer, +10 Resilience', ap: 1, cost: 12,
+      { label: 'Accelerate NEWater', sub: 'Long-term answer, +10 Resilience', ap: 1, cost: 9,
         fx: (s, c) => { H.g(s, 'res', 10); H.rel(s, c.nation, -2); H.heat(s, c.nation, -3); } },
       { label: 'Ride it out', sub: 'Free, but supplies suffer', ap: 0, cost: 0, free: true,
         fx: (s, c) => { H.g(s, 'res', -8); H.rel(s, c.nation, -3); } },
@@ -205,9 +284,9 @@ export const CRISES = {
     text: () => 'Armed boardings in the Strait. Insurers raise premiums on every ship calling at Singapore.',
     erupt: (s) => { H.g(s, 'hub', -8); return 'Insurers flee. Hub −8.'; },
     options: [
-      { label: 'Joint patrols', sub: 'Shared burden, shared credit', ap: 1, cost: 6,
+      { label: 'Joint patrols', sub: 'Shared burden, shared credit', ap: 1, cost: 5,
         fx: (s, c) => { H.rel(s, c.nation, 5); H.g(s, 'hub', 3); H.g(s, 'det', 2); } },
-      { label: 'Go it alone', sub: 'Faster, but bruises egos', ap: 1, cost: 6,
+      { label: 'Go it alone', sub: 'Faster, but bruises egos', ap: 1, cost: 5,
         fx: (s, c) => { H.g(s, 'det', 4); H.g(s, 'hub', 4); H.rel(s, c.nation, -5); } },
       { label: 'Ignore it', sub: 'Free, but trade takes the hit', ap: 0, cost: 0, free: true,
         fx: (s) => { H.g(s, 'hub', -8); } },
@@ -219,7 +298,7 @@ export const CRISES = {
     text: () => 'Conflict in Myanmar sends thousands across borders. ASEAN looks to its richest member.',
     erupt: (s, c) => { H.g(s, 'stab', -6); H.rel(s, c.nation, -3); return 'Pressure builds at home. Stability −6.'; },
     options: [
-      { label: 'Fund ASEAN relief', sub: 'Humanitarian, earns trust', ap: 1, cost: 8,
+      { label: 'Fund ASEAN relief', sub: 'Humanitarian, earns trust', ap: 1, cost: 6,
         fx: (s, c) => { H.rel(s, c.nation, 5); H.g(s, 'stab', -1); H.g(s, 'hub', 2); } },
       { label: 'Tighten borders', sub: 'Calms voters, chills ties', ap: 1, cost: 2,
         fx: (s, c) => { H.g(s, 'stab', 2); H.rel(s, c.nation, -6); } },
@@ -237,7 +316,7 @@ export const CRISES = {
         w: 'Raids begin within days.', l: 'They stonewall and resent the pressure.',
         win: (s, c) => { H.g(s, 'stab', 6); H.rel(s, c.nation, 3); H.g(s, 'hub', 2); },
         lose: (s, c) => { H.rel(s, c.nation, -10); H.heat(s, c.nation, 8); } },
-      { label: 'Fund a joint taskforce', sub: 'Slow, steady, cooperative', ap: 1, cost: 6,
+      { label: 'Fund a joint taskforce', sub: 'Slow, steady, cooperative', ap: 1, cost: 5,
         fx: (s, c) => { H.g(s, 'stab', 5); H.rel(s, c.nation, 5); } },
       { label: 'Ignore it', sub: 'Free, but trust erodes', ap: 0, cost: 0, free: true,
         fx: (s) => { H.g(s, 'stab', -7); } },
@@ -249,9 +328,9 @@ export const CRISES = {
     text: (n) => `${n} opens a giant deep-water port. Shipping lines are tempted by lower fees.`,
     erupt: (s) => { H.g(s, 'hub', -10); return 'Cargo drifts away. Hub −10.'; },
     options: [
-      { label: 'Automate our own port', sub: 'Out-compete them', ap: 1, cost: 12,
+      { label: 'Automate our own port', sub: 'Out-compete them', ap: 1, cost: 9,
         fx: (s) => { H.g(s, 'hub', 8); } },
-      { label: 'Partner with them', sub: 'Turn a rival into a feeder', ap: 1, cost: 4,
+      { label: 'Partner with them', sub: 'Turn a rival into a feeder', ap: 1, cost: 3,
         fx: (s, c) => { H.rel(s, c.nation, 8); H.g(s, 'hub', 2); H.heat(s, c.nation, -4); } },
       { label: 'Ignore it', sub: 'Free, but the Hub bleeds', ap: 0, cost: 0, free: true,
         fx: (s) => { H.g(s, 'hub', -10); } },
@@ -263,9 +342,9 @@ export const CRISES = {
     text: () => 'Bangkok revives a canal and rail bridge to bypass the Strait, with Beijing quietly interested.',
     erupt: (s) => { H.g(s, 'hub', -8); return 'The plan gains momentum. Hub −8.'; },
     options: [
-      { label: 'Offer a joint logistics deal', sub: 'Stay in the loop', ap: 1, cost: 8,
+      { label: 'Offer a joint logistics deal', sub: 'Stay in the loop', ap: 1, cost: 6,
         fx: (s, c) => { H.rel(s, c.nation, 8); H.rel(s, 'CN', 4); H.g(s, 'hub', 3); } },
-      { label: 'Lobby Washington', sub: 'Raise concerns, lean west', ap: 1, cost: 3,
+      { label: 'Lobby Washington', sub: 'Raise concerns, lean west', ap: 1, cost: 2,
         fx: (s) => { H.rel(s, 'US', 6); H.rel(s, 'CN', -4); H.g(s, 'hub', 2); } },
       { label: 'Ignore it', sub: 'Free, but the Hub bleeds', ap: 0, cost: 0, free: true,
         fx: (s) => { H.g(s, 'hub', -8); } },
@@ -277,9 +356,9 @@ export const CRISES = {
     text: () => 'Hydropower exports stall and spot electricity prices spike across the region.',
     erupt: (s) => { H.g(s, 'stab', -5); H.g(s, 'res', -6); return 'Blackouts hit. Stability −5, Resilience −6.'; },
     options: [
-      { label: 'Diversify our energy', sub: 'Long-term fix, +10 Resilience', ap: 1, cost: 10,
+      { label: 'Diversify our energy', sub: 'Long-term fix, +10 Resilience', ap: 1, cost: 8,
         fx: (s) => { H.g(s, 'res', 10); } },
-      { label: 'Buy at spot prices', sub: 'Expensive stopgap', ap: 1, cost: 15,
+      { label: 'Buy at spot prices', sub: 'Expensive stopgap', ap: 1, cost: 11,
         fx: (s) => { H.g(s, 'res', 4); H.g(s, 'stab', 2); } },
       { label: 'Ride it out', sub: 'Free, but lights flicker', ap: 0, cost: 0, free: true,
         fx: (s) => { H.g(s, 'stab', -5); H.g(s, 'res', -6); } },
@@ -322,7 +401,7 @@ export const CRISES = {
     text: (n) => `Government networks are probed, with traces leading toward ${n}. Data may already be out.`,
     erupt: (s) => { H.g(s, 'stab', -6); H.g(s, 'hub', -4); return 'Data leaks. Stability −6, Hub −4.'; },
     options: [
-      { label: 'Hunt the intruders', sub: 'Quiet, competent response', ap: 1, cost: 6,
+      { label: 'Hunt the intruders', sub: 'Quiet, competent response', ap: 1, cost: 5,
         fx: (s) => { H.g(s, 'det', 4); H.g(s, 'stab', 2); } },
       { label: 'Name and shame', sub: 'Strong signal, big risk', ap: 1, cost: 0, brink: true,
         w: 'The attribution sticks.', l: 'They deny it and hit back diplomatically.',
@@ -363,9 +442,9 @@ export const CRISES = {
         w: 'They back down.', l: 'They call the bluff. War!',
         win: (s, c) => { H.heat(s, c.nation, -35); H.g(s, 'det', 5); H.g(s, 'stab', 8); },
         lose: (s, c) => { H.g(s, 'stab', -10); H.g(s, 'hub', -6); H.heat(s, c.nation, -10); H.war(s, c.nation, { aggressor: false, start: -15, reason: 'ultimatum' }); } },
-      { label: 'Mobilise and fight', sub: 'Meet force with force. Opens a war', ap: 1, cost: 5,
+      { label: 'Mobilise and fight', sub: 'Meet force with force. Opens a war', ap: 1, cost: 0,
         fx: (s, c) => { H.war(s, c.nation, { aggressor: false, start: 0, reason: 'ultimatum' }); } },
-      { label: 'Rally a great power', sub: 'Phone Washington or Beijing', ap: 1, cost: 5, brink: true,
+      { label: 'Rally a great power', sub: 'Phone Washington or Beijing', ap: 1, cost: 4, brink: true,
         pfn: (s) => 40 + (Math.max(s.powers.US.rel, s.powers.CN.rel) - 50) * 0.6,
         w: 'A powerful call cools tempers.', l: 'Nobody picks up in time.',
         win: (s, c) => { H.heat(s, c.nation, -25); H.g(s, 'det', 3); },
@@ -378,7 +457,7 @@ export const CRISES = {
   call_favor: {
     icon: '📞', opp: true, call: true, nations: ['MY', 'ID', 'BN', 'TH', 'VN', 'KH', 'LA', 'MM'], w: 2, timer: 1,
     title: (n) => `Late Call from ${n}`,
-    text: (n, c) => `Your phone buzzes past midnight. It is ${leaderName(c.nation)}, friendly but wanting something: public backing in a regional spat.`,
+    text: (n, c, s) => `Your phone buzzes past midnight. It is ${leaderName(c.nation, s)}, friendly but wanting something: public backing in a regional spat.`,
     erupt: () => 'The call goes to voicemail. They do not call back.',
     options: [
       { label: 'Back them publicly', sub: '+8 trust, but others notice (+3 tension elsewhere)', ap: 1, cost: 0,
@@ -389,7 +468,7 @@ export const CRISES = {
   call_tip: {
     icon: '🕵️', opp: true, call: true, nations: ['MY', 'ID', 'TH', 'VN', 'KH', 'MM'], w: 2, timer: 1,
     title: (n) => `Quiet Word from ${n}`,
-    text: (n, c) => `${leaderName(c.nation)} lets something slip over a secure line: a hint of what they really intend. You could press for more.`,
+    text: (n, c, s) => `${leaderName(c.nation, s)} lets something slip over a secure line: a hint of what they really intend. You could press for more.`,
     erupt: () => 'The line goes dead.',
     options: [
       { label: 'Press for the details', sub: 'Free scout for 4 turns, +2 trust', ap: 1, cost: 0,
@@ -400,7 +479,7 @@ export const CRISES = {
   call_warning: {
     icon: '☎️', call: true, nations: ['MY', 'ID', 'VN', 'MM', 'KH'], w: 2, timer: 1,
     title: (n) => `Warning Call from ${n}`,
-    text: (n, c) => `${leaderName(c.nation)} is on the line and not smiling. Patience is "running thin". Say the right thing, or the temperature rises.`,
+    text: (n, c, s) => `${leaderName(c.nation, s)} is on the line and not smiling. Patience is "running thin". Say the right thing, or the temperature rises.`,
     erupt: (s, c) => { H.heat(s, c.nation, 6); H.g(s, 'stab', -2); return 'Silence reads as weakness. Tension +6, Stability −2.'; },
     options: [
       { label: 'Reassure them', sub: 'A gamble. Win: tension −15. Lose: +5', ap: 1, cost: 0, brink: true,
@@ -410,13 +489,34 @@ export const CRISES = {
         fx: (s, c) => { H.g(s, 'det', 3); H.heat(s, c.nation, 4); } },
     ],
   },
+  mediate: {
+    icon: '🕊️', opp: true, reg: true, nations: [], w: 0, timer: 2,
+    title: (n, c) => `${n} vs ${c && c.other ? NATIONS[c.other].name : 'a neighbour'}`,
+    text: (n, c, s) => {
+      const o = NATIONS[c.other].name, f = s.feuds && s.feuds[c.key], why = FEUDS[c.key].why;
+      return f && f.war > 0
+        ? `${n} and ${o} are at war over ${why}. The fighting is rattling shipping lanes and supply chains, and both look to Singapore.`
+        : `Tension between ${n} and ${o} over ${why} has spilled into a clash. Both capitals are watching what Singapore does next.`;
+    },
+    erupt: () => 'Singapore stays out. The dispute runs its course.',
+    options: [
+      { label: 'Offer to mediate', sub: 'A gamble: calms the dispute and earns trust with both', ap: 1, cost: 2, brink: true,
+        pfn: (s, c) => 40 + (s.nations[c.nation].rel + s.nations[c.other].rel) / 4 - (s.feuds[c.key].t - 50) * 0.2,
+        w: 'Both sides accept Singapore\'s good offices.', l: 'The talks collapse and both blame the go-between.',
+        win: (s, c) => { const f = s.feuds[c.key]; f.t = clamp(f.t - 35); f.war = 0; H.rel(s, c.nation, 6); H.rel(s, c.other, 6); H.g(s, 'hub', 2); },
+        lose: (s, c) => { H.rel(s, c.nation, -3); H.rel(s, c.other, -3); } },
+      { label: (s, c) => `Back ${NATIONS[c.nation].name}`, sub: 'Favour with one side, resentment from the other', ap: 1, cost: 0,
+        fx: (s, c) => { H.rel(s, c.nation, 8); H.rel(s, c.other, -6); s.feuds[c.key].t = clamp(s.feuds[c.key].t + 6); } },
+      { label: 'Stay out', sub: 'Free. The dispute runs its course', ap: 0, cost: 0, free: true, fx: () => {} },
+    ],
+  },
   opp_trade: {
     icon: '📈', opp: true, nations: ['VN', 'ID', 'BN', 'MY', 'TH', 'KH', 'LA'], w: 3, timer: 2,
     title: () => 'Trade Opening',
     text: (n) => `${n} offers a window of preferential market access. It will not stay open long.`,
     erupt: () => 'The window closes.',
     options: [
-      { label: 'Seize the opening', sub: '+8 Hub, +5 trust', ap: 1, cost: 5,
+      { label: 'Seize the opening', sub: '+8 Hub, +5 trust', ap: 1, cost: 4,
         fx: (s, c) => { H.g(s, 'hub', 8); H.rel(s, c.nation, 5); } },
       { label: 'Let it pass', sub: 'Nothing happens', ap: 0, cost: 0, free: true, fx: () => {} },
     ],

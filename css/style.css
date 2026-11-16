@@ -239,3 +239,15 @@ table.mil td.over { color: var(--red); } table.mil tr.me td { color: var(--teal)
 .ver { font: 600 11px var(--mono); letter-spacing: .08em; color: var(--muted); text-align: center; margin-top: 14px; }
 .changelog li { font-size: 12px; color: var(--muted); margin: 3px 0; }
 .changelog li b { color: var(--teal); margin-right: 4px; }
+
+.list li.news { border-left: 3px solid var(--blue, #5aa9ff); }
+.feud { stroke: #5aa9ff; stroke-width: .35; stroke-dasharray: 1.2 1.6; opacity: 0; transition: opacity .4s; pointer-events: none; }
+.feud.warm { opacity: .35; } .feud.hot { stroke: #ffb547; opacity: .8; stroke-width: .5; }
+.feud.war { stroke: #ff4d5e; opacity: .95; stroke-width: .7; stroke-dasharray: none; }
+.bars.n3 { grid-template-columns: repeat(3, 1fr); gap: 8px; } .bar.unrest i::after { background: #b58aff; }
+.disputes { display: flex; flex-wrap: wrap; gap: 6px; margin: 6px 0 2px; }
+.dsp { font: 600 11px var(--mono); letter-spacing: .03em; padding: 3px 8px; border-radius: 999px; background: #10294a; color: var(--muted); }
+.dsp.hot { color: #ffb547; } .dsp.war { color: #fff; background: #b8323f; }
+
+#target { max-height: 40%; overflow-y: auto; }
+.leader .t-sub.q { font-size: 12px; }

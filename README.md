@@ -47,7 +47,7 @@ python3 -m http.server 8080      # then open http://localhost:8080
 
 ## Balance snapshot (500 seeds)
 
-4 AP a turn, $60B start. Idle bot 0% wins, random bot ~49%, a competent heuristic bot ~93% (humans land well below the bot). Tune in `data.js` / `forces.js` / `engine.js` and re-run `node tests/sim.mjs 500`.
+4 AP a turn, $70B start, about $11-13B income a turn. Idle bot 0% wins, random bot ~86%, competent bot 100% (score ~390 vs rank thresholds 220/300/380). Money is meant to enable your own decisions, so difficulty comes from crises, AP and the score ranks.
 
 ## Leaders, night calls, saves
 
@@ -55,6 +55,13 @@ python3 -m http.server 8080      # then open http://localhost:8080
 - Night calls (`call_*` crises) last one turn: favours, tips and warnings from leaders.
 - The game autosaves to `localStorage` after every action (including the RNG state) and offers Continue on the title screen. The end screen shows a gauge graph and the key moments of your term.
 - Music and sound toggles are in the menu (⋯). Audio starts on the first tap, as browsers require.
+
+## The region (v0.6)
+
+- Malaysia and Indonesia are the natural rivals and get most of the friction. Vietnam and Brunei lean friendly. Myanmar and Cambodia are mostly absorbed in their own affairs. Tune in `NATIONS` (`bias`, `home`, `unrest`) and the geography weights in `spawnCrises`.
+- **Neighbour disputes** (`FEUDS` in `data.js`, stepped by `stepFeuds` in `engine.js`): pairs such as Myanmar–Thailand, Cambodia–Thailand and Malaysia–Indonesia build tension, clash, and can go to war. Wars drain both armies, distract them from Singapore and cost Hub. Singapore can mediate, back a side or stay out (`mediate` crisis).
+- **Covert factions** (`covertOp`, `regimeChange`): the Intel action *Back Opposition Factions* raises a nation's unrest. Enough unrest topples the government, and the new leader (`REGIMES`) may be a reformer or a hardliner. Failure exposes Singapore.
+- War operations no longer cost money; wars cost Stability, Hub and equipment instead.
 
 ## Adding a crisis
 
