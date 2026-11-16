@@ -1,4 +1,6 @@
 // UI layer: renders the radar map, HUD, action panel and crisis sheets from engine state.
+import { ROLES, ROLE_KEYS, MTRAITS, eskill } from './cabinet.js';
+import { quoteFor } from './voices.js';
 import { NATIONS, POWERS, ACTIONS, CRISES, INTENTS, CATS, LEADERS, STYLES, leaderOf, FEUDS } from './data.js';
 import * as E from './engine.js';
 import { sfx, music } from './audio.js';
@@ -8,6 +10,7 @@ import { UNITS, unitById, SUPPLIERS, POLITICS_NOTE, DOMAINS, powers, upkeep, det
 const $ = (q, r = document) => r.querySelector(q);
 const $$ = (q, r = document) => [...r.querySelectorAll(q)];
 const ALL = { ...NATIONS, ...POWERS };
+const NAME = new Proxy(ALL, { get: (o, k) => (k === 'SG' ? { name: 'Singapore' } : o[k]) });
 const CX = 50, CY = 62;
 const pos = (a, r) => ({ x: CX + Math.sin((a * Math.PI) / 180) * r, y: CY - Math.cos((a * Math.PI) / 180) * r });
 const store = {
@@ -119,7 +122,7 @@ function renderHud() {
   const g = S.g;
   $('#hud').innerHTML = `<div class="hud-top">
     <div class="brand"><i></i>RED DOT</div>
-    <div class="date">${E.turnLabel(S)} · ${Math.min(S.turn, E.MAX_TURN)}/${E.MAX_TURN}${ui.mode === 'daily' ? ' · DAILY' : ''}</div>
+    <div class="date">${E.turnLabel(S)} · ${Math.min(S.turn, E.maxT(S))}/${E.maxT(S)}${S.term > 1 ? ' · TERM ' + S.term : ''}${ui.mode === 'daily' ? ' · DAILY' : ''}</div>
     <div class="money">$${S.money}B <small>+${E.income(S)}</small></div>
     <button class="icon-btn" data-a="menu" aria-label="Menu">⋯</button></div>
     <div class="gauges">${gaugeHTML('STAB', g.stab)}${gaugeHTML('DETER', g.det)}${gaugeHTML('HUB', g.hub)}${gaugeHTML('RESIL', g.res)}</div>`;
@@ -132,8 +135,8 @@ function milRow(code) {
 }
 
 function leaderRow(code) {
-  const L = leaderOf(S, code), st = STYLES[L.style];
-  return `<div class="leader"><b>${L.name}</b><span class="tag" title="${st.note}">${st.label.toUpperCase()}</span><div class="t-sub q" style="margin:2px 0 0">${L.quip}</div></div>`;
+  const L = leaderOf(S, code), st = STYLES[L.style] || STYLES.proud;
+  return `<div class="leader"><b>${L.name}</b><span class="tag" title="${st.note}">${st.label.toUpperCase()}</span><div class="t-sub q" style="margin:2px 0 0">${L.quip}</div><div class="t-sub q say">${quoteFor(S, code, L)}</div></div>`;
 }
 
 function disputesRow(code) {
@@ -156,17 +159,18 @@ function targetHTML() {
     <div class="bars ${isN ? 'n3' : ''}"><div class="bar"><small><span>TRUST</span><span>${Math.round(o.rel)}</span></small><i style="--v:${o.rel}%"></i></div>
     ${isN ? `<div class="bar heat"><small><span>TENSION</span><span>${Math.round(o.heat)}</span></small><i style="--v:${o.heat}%"></i></div>` : ''}
     ${isN ? `<div class="bar unrest"><small><span>UNREST</span><span>${o.scout > 0 ? Math.round(o.unrest) : '~' + Math.round(o.unrest / 10) * 10}</span></small><i style="--v:${o.unrest}%"></i></div>` : ''}</div>
-    ${isN ? disputesRow(t) : ''}
-    ${isN ? leaderRow(t) : ''}
+    ${isN ? disputesRow(t) : S.pact === t ? `<div class="disputes"><span class="dsp ally">🤝 PARTNER${S.pactStrain ? ` · strain ${S.pactStrain}/3` : ''}</span></div>` : ''}
+    ${leaderRow(t)}
     ${isN ? milRow(t) : ''}
-    ${cs.slice(0, 1).map((c) => `<button class="t-crisis" data-a="crisis" data-uid="${c.uid}">${CRISES[c.tpl].icon} ${CRISES[c.tpl].title(ALL[c.nation].name, c)} · ${c.timer} turn${c.timer > 1 ? 's' : ''} left${cs.length > 1 ? ` (+${cs.length - 1} more)` : ''} ›</button>`).join('')}`;
+    ${cs.slice(0, 1).map((c) => `<button class="t-crisis" data-a="crisis" data-uid="${c.uid}">${CRISES[c.tpl].icon} ${CRISES[c.tpl].title(NAME[c.nation].name, c)} · ${c.timer} turn${c.timer > 1 ? 's' : ''} left${cs.length > 1 ? ` (+${cs.length - 1} more)` : ''} ›</button>`).join('')}`;
 }
 
 function renderTabs() {
   const n = S.crises.filter((c) => !CRISES[c.tpl].opp).length;
   $('#tabs').innerHTML = `<button class="tab ${ui.tab === 'act' ? 'on' : ''}" data-a="tab" data-tab="act" role="tab">ACTIONS</button>
     <button class="tab ${ui.tab === 'cri' ? 'on' : ''}" data-a="tab" data-tab="cri" role="tab">CRISES${S.crises.length ? `<em>${S.crises.length}</em>` : ''}</button>
-    <button class="tab ${ui.tab === 'frc' ? 'on' : ''}" data-a="tab" data-tab="frc" role="tab">FORCES${S.orders.length ? `<em class="blue">${S.orders.length}</em>` : ''}</button>`;
+    <button class="tab ${ui.tab === 'frc' ? 'on' : ''}" data-a="tab" data-tab="frc" role="tab">FORCES${S.orders.length ? `<em class="blue">${S.orders.length}</em>` : ''}</button>
+    <button class="tab ${ui.tab === 'cab' ? 'on' : ''}" data-a="tab" data-tab="cab" role="tab">CABINET</button>`;
   return n;
 }
 
@@ -178,7 +182,7 @@ function actionsHTML() {
     const label = a.tgt && ui.target && st.ok ? `${a.name} → ${ui.target}` : a.name;
     return `<button class="act" data-a="do" data-id="${a.id}" ${st.ok ? '' : 'disabled'}>
       <b>${label}</b><div class="chips"><em>${a.ap} AP</em>${a.cost ? `<em class="money">$${a.cost}B</em>` : ''}</div>
-      <span>${st.ok || needsTarget ? a.desc : `<i class="why">${st.reason}</i> · ${a.desc}`}</span>
+      <span>${st.ok || needsTarget ? a.desc : `<i class="why">${st.reason}</i> · ${a.desc}`}${a.dyn && a.dyn(S) ? ` <b class="dyn">${a.dyn(S)}</b>` : ''}</span>
       ${needsTarget ? `<span class="why">${st.reason}</span>` : ''}</button>`;
   }).join('');
   return `<div class="cats">${cats}</div>${list}`;
@@ -190,9 +194,22 @@ function crisesHTML() {
     const t = CRISES[c.tpl];
     const cls = t.opp ? 'good' : c.timer <= 1 ? 'urgent' : '';
     return `<button class="card-c ${cls}" data-a="crisis" data-uid="${c.uid}">
-      <b>${t.icon} ${t.title(ALL[c.nation].name, c)}</b><div class="chips"><em class="tm">${t.call ? 'CALL ' : t.reg ? 'REGION ' : t.opp ? 'OFFER ' : ''}${c.timer}T</em></div>
+      <b>${t.icon} ${t.title(NAME[c.nation].name, c)}</b><div class="chips"><em class="tm">${t.call ? 'CALL ' : t.reg ? 'REGION ' : t.opp ? 'OFFER ' : ''}${c.timer}T</em></div>
       <span>${c.nation} · ${t.opp ? 'Opportunity' : 'Resolve before the timer ends'}</span></button>`;
   }).join('');
+}
+
+function cabinetHTML() {
+  const rows = ROLE_KEYS.map((r) => {
+    const m = S.cabinet[r], R = ROLES[r], es = eskill(S, r), sulk = m.loyalty < 30, cd = S.cd['m_' + r] || 0;
+    return `<div class="min"><div class="mh"><b>${R.icon} ${R.label}</b><span class="tag">${'★'.repeat(m.skill)}${'☆'.repeat(5 - m.skill)}</span></div>
+      <div class="t-sub" style="margin:2px 0">${m.name} · ${MTRAITS[m.trait] ? MTRAITS[m.trait].label : 'Acting'}${sulk ? ' · <b class="dyn">sulking (60%)</b>' : ''}</div>
+      <div class="bar"><small><span>LOYALTY</span><span>${Math.round(m.loyalty)}</span></small><i style="--v:${m.loyalty}%"></i></div>
+      <div class="t-sub" style="margin:2px 0">${R.gives(es)}</div>
+      <div class="row2"><button class="btn alt sm" data-a="praise" data-role="${r}" ${S.ap < 1 ? 'disabled' : ''}>Back them · 1 AP</button>
+      <button class="btn alt sm" data-a="replace" data-role="${r}" ${S.ap < 1 || S.money < 3 || cd ? 'disabled' : ''}>${cd ? `Ready in ${cd}t` : 'Replace · 1 AP $3B'}</button></div></div>`;
+  }).join('');
+  return `<div class="t-sub" style="margin:0 0 6px">Good ministers pay for themselves. Keep Stability up and they stay loyal; a sulking minister works at 60%.</div>${rows}`;
 }
 
 function forcesHTML() {
@@ -214,6 +231,7 @@ function overviewHTML() {
   return `<div class="bars3">${bar('LAND', me.land)}${bar('AIR', me.air)}${bar('SEA', me.sea)}</div>
     <p class="fine">Deterrence <b>${S.g.det}</b> = forces − arms race (${Math.round(S.arms)}) ${S.posture ? `${S.posture > 0 ? '+' : '−'} posture ${Math.abs(S.posture)}` : ''}<br>
     Upkeep <b>${net >= 0 ? '+' : '−'}$${Math.abs(net).toFixed(1)}B/turn</b> beyond your starting forces · Orders <b>${S.ordersThisTurn}/${E.ORDERS_PER_TURN}</b> this turn</p>
+    ${S.nuke && S.nuke.prog > 0 ? `<h4>Nuclear programme</h4><div class="bars3" style="grid-template-columns:1fr"><div class="bar"><small><span>PROGRESS${S.nuke.halted ? ' · CAPPED' : ''}</span><span>${Math.round(S.nuke.prog)}%</span></small><i style="--v:${S.nuke.prog}%"></i></div></div><p class="fine">${S.nuke.device ? 'A strategic deterrent is in hand. ' : ''}${S.nuke.power ? 'The civil plant is online (Resilience, cheaper power). ' : 'Around 35%: a civil plant comes online. '}${S.nuke.exposed && !S.nuke.device ? '<b>Exposed: the region is watching.</b>' : ''}</p>` : ''}
     ${inbound ? `<h4>In transit</h4><ul class="list">${inbound}</ul>` : ''}
     <h4>Regional balance</h4>
     <table class="mil"><tr><th></th><th>LAND</th><th>AIR</th><th>SEA</th></tr><tr class="me"><td><b>SG</b> You</td><td>${me.land}</td><td>${me.air}</td><td>${me.sea}</td></tr>${rows}</table>
@@ -226,7 +244,7 @@ function shopHTML(dom) {
   return `<p class="fine">${DOMAINS[dom]} power ${powers(S)[dom]} · ${S.ordersThisTurn}/${E.ORDERS_PER_TURN} orders used · $${S.money}B</p>` + list.map((u) => {
     const st = E.unitState(S, u), own = S.forces[u.id] || 0, inb = S.orders.filter((o) => o.unit === u.id).length;
     return `<button class="act unit ${st.ok ? '' : 'locked'}" data-a="unit" data-id="${u.id}">
-      <b>${u.name}</b><div class="chips"><em class="sup">${u.sup}</em><em class="money">$${u.cost}B</em></div>
+      <b>${u.name}</b><div class="chips"><em class="sup">${u.sup}</em><em class="money">$${E.unitCost(S, u)}B</em></div>
       <span>+${u.pw} ${DOMAINS[dom]} · T${u.tier}${own ? ` · own ${own}` : ''}${inb ? ` · +${inb} inbound` : ''}${st.ok ? '' : ` · <i class="why">${st.reason}</i>`}</span></button>`;
   }).join('');
 }
@@ -235,17 +253,17 @@ function orderSheet(id) {
   const u = unitById[id], st = E.unitState(S, u), own = S.forces[id] || 0;
   const ico = { land: '🪖', air: '✈️', sea: '⚓' }[u.dom];
   sheet(`<div class="s-head"><span class="ico">${ico}</span><div><h2>${u.name}</h2><div class="meta">${SUPPLIERS[u.sup].name.toUpperCase()} · TIER ${u.tier} · OWN ${own}</div></div></div>
-    <div class="chiprow"><span class="chip g">+${u.pw} ${DOMAINS[u.dom]} power</span><span class="chip g">Deterrence ≈ +${detGain(u)}</span><span class="chip b">$${u.cost}B</span><span class="chip b">Upkeep $${u.up}B/turn</span><span class="chip">Delivery ${u.delay} turns</span></div>
+    <div class="chiprow"><span class="chip g">+${u.pw} ${DOMAINS[u.dom]} power</span><span class="chip g">Deterrence ≈ +${detGain(u)}</span><span class="chip b">$${E.unitCost(S, u)}B</span><span class="chip b">Upkeep $${u.up}B/turn</span><span class="chip">Delivery ${u.delay} turns</span></div>
     ${POLITICS_NOTE[u.sup] ? `<p class="s-text">Supplier politics: ${POLITICS_NOTE[u.sup]}.</p>` : ''}
     ${st.ok ? '' : `<p class="s-text why-box">${st.reason}</p>`}
-    <div class="row2"><button class="btn alt" data-a="close">Cancel</button><button class="btn" data-a="order" data-id="${id}" ${st.ok ? '' : 'disabled'}>Order · $${u.cost}B</button></div>`);
+    <div class="row2"><button class="btn alt" data-a="close">Cancel</button><button class="btn" data-a="order" data-id="${id}" ${st.ok ? '' : 'disabled'}>Order · $${E.unitCost(S, u)}B</button></div>`);
 }
 
 function renderPanel() {
   renderTabs();
   $('#target').innerHTML = targetHTML();
   const body = $('#body'), top = body.scrollTop;
-  body.innerHTML = ui.tab === 'act' ? actionsHTML() : ui.tab === 'cri' ? crisesHTML() : forcesHTML();
+  body.innerHTML = ui.tab === 'act' ? actionsHTML() : ui.tab === 'cri' ? crisesHTML() : ui.tab === 'cab' ? cabinetHTML() : forcesHTML();
   body.scrollTop = top;
 }
 
@@ -334,6 +352,9 @@ function howSheet(back) {
       <li><b>Survive 20 quarters.</b> Keep Stability, Deterrence, Hub and Resilience above zero, and do not let a hostile neighbour find you defenceless.</li>
       <li><b>4 action points a turn.</b> Tap a node on the radar to target it, then pick an action. Everything costs AP and usually money.</li>
       <li><b>Crises tick down.</b> The badge on the map is the timer. Ignore one and it erupts. Open the Crises tab to respond.</li>
+      <li><b>The giants meddle.</b> Washington and Beijing arm, fund and lean on the region, and on you. Their moves show up as news and crises. Keep a balance or pay for it.</li>
+      <li><b>Terms.</b> Survive five years and the voters decide. If they like you, you can seek another term (up to three), tougher each time.</li>
+      <li><b>Nuclear Programme.</b> Under Defence. Slow and costly, and it will be noticed. A civil plant at ~35% helps Resilience; 100% gives a deterrent and alarms everyone.</li>
       <li><b>Neighbours quarrel too.</b> Dashed lines on the radar are disputes between other countries. They can clash and even go to war, which distracts them from you. You can mediate, take a side or stay out.</li>
       <li><b>Covert factions.</b> Under Intel, you can secretly back a regime's opponents. Enough unrest topples the government, and the replacement may be a friend or a hardliner. Get caught and trust collapses.</li>
       <li><b>Quality beats quantity.</b> Neighbours may look bigger on paper, but your tech edge and their spread-out forces count in a war, and make hawks think twice.</li>
@@ -357,7 +378,7 @@ function menuSheet() {
 function reportSheet(title, events, created, chips, icon = '📋') {
   const lines = [
     ...events.map((e) => `<li class="${e.kind}">${e.kind === 'erupt' ? '💥 ' : e.kind === 'news' ? '📰 ' : ''}${e.text}</li>`),
-    ...created.map((c) => `<li class="new">${CRISES[c.tpl].icon} <b>${CRISES[c.tpl].title(ALL[c.nation].name, c)}</b> · ${c.nation} · ${c.timer} turn${c.timer > 1 ? 's' : ''}</li>`),
+    ...created.map((c) => `<li class="new">${CRISES[c.tpl].icon} <b>${CRISES[c.tpl].title(NAME[c.nation].name, c)}</b> · ${c.nation} · ${c.timer} turn${c.timer > 1 ? 's' : ''}</li>`),
   ].join('');
   sheet(`<div class="s-head"><span class="ico">${icon}</span><div><h2>${title}</h2><div class="meta">${S.crises.length} ACTIVE CRISES</div></div></div>
     <ul class="list">${lines}</ul><div class="chiprow">${chipsHTML(chips)}</div><button class="btn" data-a="after">Continue</button>`);
@@ -366,7 +387,7 @@ function reportSheet(title, events, created, chips, icon = '📋') {
 function crisisSheet(uid) {
   const c = S.crises.find((x) => x.uid === uid);
   if (!c) { closeSheet(); return; }
-  const t = CRISES[c.tpl], nm = ALL[c.nation].name;
+  const t = CRISES[c.tpl], nm = NAME[c.nation].name;
   const opts = E.crisisOptions(S, c);
   const html = opts.map((o) => {
     const b = o.brink;
@@ -401,7 +422,7 @@ function attemptEnd() {
   const risky = S.crises.filter((c) => c.timer <= 1 && !CRISES[c.tpl].opp);
   if (risky.length) {
     sheet(`<div class="s-head"><span class="ico">⚠️</span><div><h2>Crises about to erupt</h2><div class="meta">LAST CHANCE</div></div></div>
-      <ul class="list">${risky.map((c) => `<li class="erupt">${CRISES[c.tpl].icon} ${CRISES[c.tpl].title(ALL[c.nation].name, c)}</li>`).join('')}</ul>
+      <ul class="list">${risky.map((c) => `<li class="erupt">${CRISES[c.tpl].icon} ${CRISES[c.tpl].title(NAME[c.nation].name, c)}</li>`).join('')}</ul>
       <div class="row2"><button class="btn alt" data-a="close">Go back</button><button class="btn red" data-a="confirmEnd">End turn</button></div>`);
   } else if (S.ap > 0) {
     sheet(`<div class="s-head"><span class="ico">⏭️</span><div><h2>End turn?</h2><div class="meta">${S.ap} AP UNUSED</div></div></div>
@@ -435,12 +456,13 @@ function showOver() {
     <div class="meta" style="margin-bottom:4px">RANK · ${sc.rank.toUpperCase()}${newBest ? ' · NEW BEST!' : ''}</div>
     ${debriefHTML()}
     <table class="score">${rows}<tr class="tot"><td>Total</td><td>${sc.total}</td></tr></table>
-    <div class="row2"><button class="btn alt" data-a="share">Share</button><button class="btn" data-a="restart">Play again</button></div>`, { dismiss: false });
+    ${o.extend ? `<button class="btn" data-a="extend" style="margin-bottom:8px">Seek another term · 5 more years</button>` : ''}
+    <div class="row2"><button class="btn alt" data-a="share">Share</button><button class="btn ${o.extend ? 'alt' : ''}" data-a="restart">${o.extend ? 'Retire & play again' : 'Play again'}</button></div>`, { dismiss: false });
 }
 
 function shareResult() {
   const o = S.over, sc = o.score;
-  const text = `RED DOT ${ui.mode === 'daily' ? '(Daily ' + new Date().toISOString().slice(0, 10) + ') ' : ''}— ${o.result === 'win' ? 'Survived 20 quarters' : 'Fell in ' + E.turnLabel(S)} · ${sc.total} pts · ${sc.rank}`;
+  const text = `RED DOT ${ui.mode === 'daily' ? '(Daily ' + new Date().toISOString().slice(0, 10) + ') ' : ''}— ${o.result === 'win' ? 'Survived ' + E.maxT(S) + ' quarters' : 'Fell in ' + E.turnLabel(S)} · ${sc.total} pts · ${sc.rank}`;
   const url = location.href.split('#')[0];
   if (navigator.share) navigator.share({ title: 'Red Dot', text, url }).catch(() => {});
   else if (navigator.clipboard) navigator.clipboard.writeText(`${text} ${url}`).then(() => toast([{ label: 'Copied to clipboard', d: 0, good: true }])).catch(() => {});
@@ -467,6 +489,11 @@ const handlers = {
     S = sv; ui.live = true; ui.target = null; ui.tab = S.crises.length ? 'cri' : 'act'; ui.cat = 'dip'; ui.warSnap = null;
     closeSheet(); render();
     if (!warCheck()) toast([{ label: 'Welcome back, Prime Minister', d: 0, good: true }]);
+  },
+  extend: () => {
+    const created = E.extendTerm(S);
+    ui.tab = 'cri'; ui.target = null; closeSheet(); render();
+    reportSheet(`${E.turnLabel(S)} · Term ${S.term}`, [{ kind: 'income', text: `The voters return you to office. A fresh mandate brings +$20B and +8 Stability, but the region is warier and the crises come faster.` }], created, [], '🗳️');
   },
   start: () => start('random'),
   daily: () => start('daily'),
@@ -500,10 +527,12 @@ const handlers = {
     const r = E.doAction(S, id, ui.target);
     if (!r.ok) { sfx.bad(); return; }
     haptic(10);
-    toast([...(r.note ? [{ label: r.note, d: 0, good: true }] : []), ...E.diff(before, E.snapshot(S))].slice(0, 6));
+    toast([...(r.note ? [{ label: r.note, d: 0, good: true }] : []), ...(r.quote ? [{ label: `${r.speaker}: ${r.quote}`, d: 0, good: true }] : []), ...E.diff(before, E.snapshot(S))].slice(0, 6));
     render();
     if (S.over) showOver(); else warCheck();
   },
+  praise: (el) => { const r = E.ministerPraise(S, el.dataset.role); if (!r.ok) { sfx.bad(); return; } sfx.ok(); toast([{ label: r.note, d: 0, good: true }]); render(); },
+  replace: (el) => { const r = E.ministerReplace(S, el.dataset.role); if (!r.ok) { sfx.bad(); return; } sfx.select(); toast([{ label: r.note, d: 0, good: true }]); render(); },
   crisis: (el) => { crisisSheet(Number(el.dataset.uid)); },
   opt: (el, e) => {
     if (el.dataset.brink && e.detail !== 0) return; // pointer users must hold; keyboard commits directly

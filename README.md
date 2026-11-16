@@ -63,6 +63,13 @@ python3 -m http.server 8080      # then open http://localhost:8080
 - **Covert factions** (`covertOp`, `regimeChange`): the Intel action *Back Opposition Factions* raises a nation's unrest. Enough unrest topples the government, and the new leader (`REGIMES`) may be a reformer or a hardliner. Failure exposes Singapore.
 - War operations no longer cost money; wars cost Stability, Hub and equipment instead.
 
+## v0.7: powers, terms, nukes
+
+- **Great-power meddling** (`meddle` in `engine.js`, `PATRON` map): each turn Washington or Beijing may arm, finance or destabilise a neighbour, and sometimes run an influence campaign on Singapore. Crises: `gp_buildup`, `gp_influence`.
+- **Elections:** at the end of a term the vote share depends on Stability, Hub, neighbour trust and Resilience. 50%+ lets you seek another term (max 3, +$20B, +8 Stability, harder crises). Below 50% you are voted out.
+- **Nuclear programme** (`nukeInvest`, `nukeStep`, crisis `nuke_probe`): Defence action, $12B and 1 AP per step. ~35% brings a civil plant (+12 Resilience, slower decay, +$1B income). 100% gives a deterrent (+25 Deterrence, far fewer attacks) at the price of regional trust, Hub and relations with both giants. It can leak, and you then choose to deny, cap it, or defy.
+- Resilience decay is now −3 a turn (−2 below 40).
+
 ## Adding a crisis
 
 Add an entry to `CRISES` in `js/data.js`: `nations` (who can trigger it), `timer`, `text`, `erupt` (penalty if ignored)
@@ -75,3 +82,8 @@ Opportunities set `opp: true`. The UI picks everything up automatically.
 - Daily Seed mode seeds from the UTC date so everyone gets the same term that day.
 - Best score is stored in `localStorage`.
 - Nations are stylised as interests and incentives, not a political study.
+
+## v0.8 — partners, cabinet, voices
+- **Partnership**: sign one with Washington or Beijing (trust 65+). US: +12 Deterrence-ish edge, 15% off US arms, advanced kit unlocked. China: +$4B income, +Hub. Strings: rival cools, its neighbours cool, and the partner calls in favours (3 refusals = strain breaks it). The rival squeezes you (coercion) or dangles carrots.
+- **Cabinet**: Finance, Defence, Foreign, Home, Trade & Industry. Skill 1–5 scales buffs; loyalty follows Stability; traits (technocrat/loyalist/maverick/showman); scandals, resignations, Back/Replace actions in the Cabinet tab.
+- **Voices**: leaders give mood-based lines and react to visits, trades, signals and covert exposure (picked deterministically, never touches the seed).

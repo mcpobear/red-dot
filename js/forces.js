@@ -116,7 +116,7 @@ export function effFoe(n, code) { const k = foeFactor(code); return { land: n.mi
 
 export function syncDet(s) {
   // the baseline edge is already part of the starting 40; extra modern kit adds to deterrence
-  s.g.det = clamp(Math.round(40 + (weighted(powers(s)) - BASE_W) * 1.6 + (edge(s) - SG_EDGE_BASE) * 40 - (s.arms || 0) + (s.posture || 0)));
+  s.g.det = clamp(Math.round(40 + (weighted(powers(s)) - BASE_W) * 1.6 + (edge(s) - SG_EDGE_BASE) * 40 + (s.nuke && s.nuke.device ? 25 : 0) - (s.arms || 0) + (s.posture || 0)));
 }
 
 // Rough Deterrence gained by adding one unit (before the arms race eats into it).

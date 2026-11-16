@@ -2,6 +2,7 @@
 // Pure data + small effect helpers. No DOM access here.
 
 import { syncDet } from './forces.js';
+import { newMinister, ROLES } from './cabinet.js';
 
 export const clamp = (v, a = 0, b = 100) => Math.max(a, Math.min(b, v));
 const otherPower = (c) => (c === 'US' ? 'CN' : 'US');
@@ -67,11 +68,32 @@ export const POWERS = {
 };
 
 
+// Who the great powers court and arm (used for meddling and for fallout from a partnership).
+export const PATRON = { US: ['VN', 'TH', 'ID', 'MY', 'BN'], CN: ['KH', 'LA', 'MM', 'MY', 'TH'] };
+
+// ---------- formal partnership with a great power ----------
+export function signPact(s, P) {
+  const R = otherPower(P);
+  s.pact = P; s.pactStrain = 0;
+  H.rel(s, P, 10); H.rel(s, R, -15);
+  for (const k of PATRON[R]) H.rel(s, k, -2);
+  syncDet(s);
+}
+export function breakPact(s, why = '') {
+  const P = s.pact; if (!P) return '';
+  const R = otherPower(P);
+  s.pact = null; s.pactStrain = 0;
+  H.rel(s, P, -15); H.rel(s, R, 5); H.g(s, 'det', -8);
+  syncDet(s);
+  return `The partnership with ${POWERS[P].name} ends${why ? ': ' + why : ''}.`;
+}
+
 // Fictional leaders. Each has a style that quietly changes how your actions land.
 export const STYLES = {
   charmer:   { label: 'Charmer',   note: 'State Visits land harder (+4 trust).' },
   dealer:    { label: 'Dealmaker', note: 'Trade Pacts pay more (+4 Hub).' },
   hardliner: { label: 'Hardliner', note: 'Respects strength: Show of Force cows them more, but visits warm them less.' },
+  great:     { label: 'Great Power', note: '' },
   proud:     { label: 'Proud',     note: 'Touchy about face: Show of Force costs you extra trust.' },
 };
 export const LEADERS = {
@@ -83,6 +105,8 @@ export const LEADERS = {
   KH: { name: 'PM Sokha',              style: 'proud',     quip: 'Leans toward Beijing and hates being reminded.' },
   LA: { name: 'President Keomany',     style: 'dealer',    quip: 'Wants power lines, not problems.' },
   MM: { name: 'Gen. Min Thura',        style: 'hardliner', quip: 'Rules by the barrel and trusts nobody.' },
+  US: { name: 'President Hale',        style: 'great',     quip: 'Wants allies who show up and pay their share.' },
+  CN: { name: 'Premier Lin',           style: 'great',     quip: 'Patient, polite and very hard to say no to.' },
 };
 // A leader can change (regime change), so the live one is stored on the nation.
 export const leaderOf = (s, c) => (s && s.nations && s.nations[c] && s.nations[c].leader) || LEADERS[c];
@@ -123,7 +147,30 @@ export const feudKey = (a, b) => (FEUDS[`${a}-${b}`] ? `${a}-${b}` : FEUDS[`${b}
 
 // Covert support for opposition factions. Success raises unrest; enough unrest topples the regime,
 // which can bring in a reformer or a hardliner. Exposure wrecks trust.
-function regimeChange(s, t) {
+
+// ---------- nuclear programme ----------
+function nukeInvest(s) {
+  const k = s.nuke, before = k.prog;
+  k.prog = Math.min(k.halted ? 60 : 100, k.prog + 12 + (s.g.hub >= 60 ? 3 : 0));
+  for (const c of Object.keys(s.nations)) H.heat(s, c, c === 'MY' || c === 'ID' ? 4 : 2);
+  let note = `Programme ${Math.round(k.prog)}%`, log = null;
+  if (!k.power && before < 35 && k.prog >= 35) {
+    k.power = true; H.g(s, 'res', 12);
+    note = 'Nuclear power plant online: Resilience +12, cheaper power from now on.';
+    log = { text: 'Singapore\'s first nuclear power plant came online.', w: 60, tone: 'good' };
+  }
+  if (!k.device && k.prog >= 100) {
+    k.device = true; k.prog = 100;
+    for (const c of Object.keys(s.nations)) { H.rel(s, c, -15); H.heat(s, c, 12); }
+    for (const p of ['US', 'CN']) H.rel(s, p, -10);
+    H.g(s, 'hub', -8); H.g(s, 'stab', 5);
+    note = 'Singapore has a nuclear deterrent. Deterrence jumps, but every capital is alarmed and sanctions bite (Hub −8).';
+    log = { text: 'Singapore completed a nuclear deterrent.', w: 100, tone: 'good' };
+  }
+  return log ? { note, log } : note;
+}
+
+export function regimeChange(s, t) {
   const n = s.nations[t], R = REGIMES[t], old = leaderName(t, s);
   const reformer = s.rand() < (n.rel >= 50 ? 0.55 : 0.45);
   n.leader = { ...(reformer ? R.reformer : R.strongman) };
@@ -177,6 +224,14 @@ export const ACTIONS = [
     desc: '+6 trust, +6 Hub. Needs trust 45+.',
     req: (s, t) => (s.nations[t].rel < 45 ? 'Needs trust 45+' : ''),
     fx: (s, t) => { H.rel(s, t, 6); H.g(s, 'hub', 6); } },
+  { id: 'pact', cat: 'dip', tgt: 'power', ap: 1, cost: 6, name: 'Sign a Partnership',
+    desc: 'Washington: +12 Deterrence, 15% off its arms, advanced kit unlocked. Beijing: +$4B income and +1 Hub a turn. The rival freezes you out, neighbours in its camp cool, and your partner will ask favours. Needs trust 65+.',
+    req: (s, t) => (s.pact ? 'Already in a partnership' : s.powers[t] && s.powers[t].rel < 65 ? `Needs ${POWERS[t].name} trust 65+` : ''),
+    fx: (s, t) => { signPact(s, t); return { note: `Partnership signed with ${POWERS[t].name}. ${POWERS[otherPower(t)].name} is not pleased.`, log: { text: `Signed a partnership with ${POWERS[t].name}.`, w: 70, tone: 'good' } }; } },
+  { id: 'unpact', cat: 'dip', tgt: null, ap: 1, cost: 0, name: 'End the Partnership',
+    desc: 'Walk away from your great-power partner. They take it badly (−15 trust, −8 Deterrence); the rival warms a little.',
+    req: (s) => (s.pact ? '' : 'No partnership to end'),
+    fx: (s) => breakPact(s, 'at your request') },
   { id: 'summit', cat: 'dip', tgt: null, ap: 1, cost: 2, cd: 2, name: 'ASEAN Summit Push',
     desc: 'Tension −4 and trust +2 across the region.',
     fx: (s) => { for (const c of Object.keys(s.nations)) { H.heat(s, c, -4); H.rel(s, c, 2); } } },
@@ -204,6 +259,11 @@ export const ACTIONS = [
     desc: 'Blocks cyber incidents for 4 turns.',
     fx: (s) => { s.shield = 4; } },
 
+  { id: 'nuke', cat: 'def', tgt: null, ap: 1, cost: 12, name: 'Nuclear Programme',
+    desc: 'Slow, costly and hard to hide. Around 35% brings a civil nuclear plant (+Resilience, cheaper power). At 100% Singapore has a strategic deterrent, but the region will not take it calmly.',
+    dyn: (s) => (s.nuke ? `Progress ${Math.round(s.nuke.prog)}%${s.nuke.power ? ' · plant online' : ''}${s.nuke.exposed ? ' · exposed' : ''}` : ''),
+    req: (s) => (s.nuke && s.nuke.device ? 'Programme complete' : s.nuke && s.nuke.halted && s.nuke.prog >= 60 ? 'Capped by agreement' : ''),
+    fx: (s) => nukeInvest(s) },
   { id: 'drill', cat: 'def', tgt: 'power', ap: 1, cost: 5, name: 'Joint Exercise',
     desc: '+8 posture (fades), +5 trust with that power (the other cools by 3).',
     fx: (s, t) => { H.g(s, 'det', 8); H.rel(s, t, 5); H.rel(s, otherPower(t), -3); } },
@@ -487,6 +547,110 @@ export const CRISES = {
         win: (s, c) => { H.heat(s, c.nation, -15); }, lose: (s, c) => { H.heat(s, c.nation, 5); } },
       { label: 'Hold the line', sub: '+3 Deterrence posture, +4 tension', ap: 1, cost: 0,
         fx: (s, c) => { H.g(s, 'det', 3); H.heat(s, c.nation, 4); } },
+    ],
+  },
+  gp_buildup: {
+    icon: '🛰️', nations: [], w: 0, timer: 3,
+    title: (n, c) => `${n} Arms ${c && c.other ? NATIONS[c.other].name : 'a Neighbour'}`,
+    text: (n, c) => `${n} is moving advanced weapons into ${NATIONS[c.other].name}. Planners in Singapore are counting what that does to the balance on the Strait.`,
+    erupt: (s, c) => { H.g(s, 'det', -4); H.heat(s, c.other, 3); return `The balance tilts. Deterrence −4, ${NATIONS[c.other].name} tension +3.`; },
+    options: [
+      { label: 'Protest quietly', sub: 'A gamble. Win: they ease off. Lose: they resent it', ap: 1, cost: 0, brink: true,
+        pfn: (s, c) => 45 + (s.powers[c.nation].rel - 50) * 0.3,
+        w: 'The message lands.', l: 'They shrug and stiffen.',
+        win: (s, c) => { H.rel(s, c.nation, 4); H.heat(s, c.other, -8); }, lose: (s, c) => { H.rel(s, c.nation, -6); } },
+      { label: 'Match it', sub: 'Posture +8 Deterrence, a little tension next door', ap: 1, cost: 3, fx: (s, c) => { H.g(s, 'det', 8); H.heat(s, c.other, 3); } },
+      { label: 'Balance with the other power', sub: 'Lean on the rival giant', ap: 1, cost: 2,
+        fx: (s, c) => { const o = otherPower(c.nation); H.rel(s, o, 8); H.rel(s, c.nation, -5); } },
+      { label: 'Ride it out', sub: 'Free, but the balance tilts', ap: 0, cost: 0, free: true, fx: (s, c) => { H.g(s, 'det', -3); } },
+    ],
+  },
+  gp_influence: {
+    icon: '📡', nations: ['US', 'CN'], w: 2, timer: 3,
+    title: (n) => `${n}'s Influence Campaign`,
+    text: (n) => `Coordinated media and online operations tied to ${n} are pushing narratives into Singapore's public debate. Opinion is starting to split.`,
+    erupt: (s) => { H.g(s, 'stab', -4); return 'Public opinion splits. Stability −4.'; },
+    options: [
+      { label: 'Run a counter-narrative', sub: '+2 Stability, mild irritation abroad', ap: 1, cost: 3, fx: (s, c) => { H.g(s, 'stab', 2); H.rel(s, c.nation, -2); } },
+      { label: 'Name and shame', sub: 'A gamble. Win: Stability up. Lose: it backfires', ap: 1, cost: 0, brink: true,
+        pfn: (s, c) => 50 + (s.g.stab - 50) * 0.3,
+        w: 'The public rallies.', l: 'It looks like a deflection.',
+        win: (s, c) => { H.g(s, 'stab', 3); H.rel(s, c.nation, -4); }, lose: (s, c) => { H.g(s, 'stab', -3); H.rel(s, c.nation, -6); } },
+      { label: 'Tighten the rules', sub: '+3 Stability, −2 Hub (looks heavy-handed)', ap: 1, cost: 2, fx: (s) => { H.g(s, 'stab', 3); H.g(s, 'hub', -2); } },
+      { label: 'Ignore it', sub: 'Free, but opinion drifts', ap: 0, cost: 0, free: true, fx: (s) => { H.g(s, 'stab', -2); } },
+    ],
+  },
+  nuke_probe: {
+    icon: '☢️', nations: [], w: 0, timer: 2,
+    title: (n) => `${n} Asks About Your Programme`,
+    text: (n) => `Word has leaked that Singapore's "civil energy" programme has a military track. ${n} demands answers, and both giants are asking what you are building.`,
+    erupt: (s) => { for (const c of Object.keys(s.nations)) H.heat(s, c, 6); s.nuke.exposed = true; return 'Silence reads as guilt. Tension rises everywhere.'; },
+    options: [
+      { label: 'Insist it is civil energy', sub: 'A gamble. Win: the cover holds. Lose: trust and Hub suffer', ap: 1, cost: 0, brink: true,
+        pfn: (s) => 40 + (s.g.stab - 50) * 0.2 + (s.powers.US.rel + s.powers.CN.rel - 100) * 0.2,
+        w: 'The denial holds, for now.', l: 'Nobody believes it.',
+        win: (s) => { s.nuke.exposed = false; for (const c of Object.keys(s.nations)) H.heat(s, c, -8); },
+        lose: (s) => { for (const c of Object.keys(s.nations)) { H.rel(s, c, -8); H.heat(s, c, 10); } H.g(s, 'hub', -4); } },
+      { label: 'Accept limits and inspections', sub: 'Keep the plant, drop the deterrent. Trust returns', ap: 1, cost: 3,
+        fx: (s) => { s.nuke.halted = true; s.nuke.exposed = false; s.nuke.prog = Math.min(s.nuke.prog, 60); for (const c of Object.keys(s.nations)) { H.rel(s, c, 6); H.heat(s, c, -12); } for (const p of ['US', 'CN']) H.rel(s, p, 6); } },
+      { label: 'Defy them', sub: 'Free. Tension and distrust, but you keep going', ap: 0, cost: 0, free: true,
+        fx: (s) => { s.nuke.exposed = true; for (const c of Object.keys(s.nations)) { H.rel(s, c, -6); H.heat(s, c, 10); } H.g(s, 'det', 8); } },
+    ],
+  },
+  gp_ally_call: {
+    icon: '🤝', nations: [], w: 0, timer: 2,
+    title: (n) => `${n} Calls In a Favour`,
+    text: (n, c, s) => `${leaderName(c.nation, s)} asks Singapore to publicly back its line and join a show of unity in the region against ${POWERS[otherPower(c.nation)].name}. Partners are expected to show up.`,
+    erupt: (s, c) => { H.rel(s, c.nation, -6); s.pactStrain = (s.pactStrain || 0) + 1; const m = (s.pactStrain >= 3) ? breakPact(s, 'too many favours refused') : ''; return `Your silence is noted. Trust −6.${m ? ' ' + m : ''}`; },
+    options: [
+      { label: 'Back them publicly', sub: 'Trust up with them, down with the rival', ap: 1, cost: 0,
+        fx: (s, c) => { const R = otherPower(c.nation); H.rel(s, c.nation, 5); H.rel(s, R, -8); s.pactStrain = Math.max(0, (s.pactStrain || 0) - 1); for (const k of PATRON[R]) H.rel(s, k, -2); } },
+      { label: 'Offer quiet support', sub: 'Less noise, less credit', ap: 1, cost: 2,
+        fx: (s, c) => { H.rel(s, c.nation, 2); H.rel(s, otherPower(c.nation), -2); } },
+      { label: 'Decline', sub: 'Free, but they will remember', ap: 0, cost: 0, free: true,
+        fx: (s, c) => { H.rel(s, c.nation, -6); s.pactStrain = (s.pactStrain || 0) + 1; if (s.pactStrain >= 3) breakPact(s, 'too many favours refused'); } },
+    ],
+  },
+  gp_coerce: {
+    icon: '⛓️', nations: [], w: 0, timer: 3,
+    title: (n) => `${n} Squeezes Singapore`,
+    text: (n, c, s) => `${n} is punishing your alignment with ${POWERS[otherPower(c.nation)].name}: customs delays, slow visas and loud warnings in its press.`,
+    erupt: (s) => { H.g(s, 'hub', -5); H.g(s, 'stab', -2); return 'Trade stumbles. Hub −5, Stability −2.'; },
+    options: [
+      { label: 'Diversify supply lines', sub: '+3 Resilience, softens the blow', ap: 1, cost: 5, fx: (s) => { H.g(s, 'res', 3); H.g(s, 'hub', 1); } },
+      { label: 'Appeal to ASEAN', sub: 'A gamble. Win: pressure eases. Lose: it stings', ap: 1, cost: 0, brink: true,
+        pfn: (s) => 45 + Object.values(s.nations).reduce((a, n) => a + n.rel, 0) / 8 * 0.3,
+        w: 'The region closes ranks behind Singapore.', l: 'Nobody wants to pick a fight with a giant.',
+        win: (s, c) => { H.rel(s, c.nation, 4); }, lose: (s, c) => { H.g(s, 'hub', -4); H.rel(s, c.nation, -4); } },
+      { label: 'Cool the partnership', sub: 'Eases pressure, and the partner is unhappy', ap: 1, cost: 0,
+        fx: (s, c) => { H.rel(s, c.nation, 6); if (s.pact) { H.rel(s, s.pact, -6); s.pactStrain = (s.pactStrain || 0) + 1; if (s.pactStrain >= 3) breakPact(s, 'strained by a cooling'); } } },
+      { label: 'Absorb it', sub: 'Free, but trade takes a hit', ap: 0, cost: 0, free: true, fx: (s) => { H.g(s, 'hub', -3); } },
+    ],
+  },
+  gp_carrot: {
+    icon: '🎁', opp: true, nations: [], w: 0, timer: 2,
+    title: (n) => `${n} Dangles a Deal`,
+    text: (n, c, s) => `${n} offers a big trade and investment package if Singapore quietly scales back its ties with ${POWERS[otherPower(c.nation)].name}. It is tempting and it has strings.`,
+    erupt: () => 'The offer lapses.',
+    options: [
+      { label: 'Take the deal', sub: '+$15B now, trust shifts, and your partner is cross', ap: 1, cost: 0,
+        fx: (s, c) => { H.money(s, 15); H.rel(s, c.nation, 8); H.rel(s, otherPower(c.nation), -8); s.pactStrain = (s.pactStrain || 0) + 1; if (s.pactStrain >= 3) breakPact(s, 'Singapore keeps flirting with its rival'); } },
+      { label: 'Politely refuse', sub: 'Free. Your partner approves', ap: 0, cost: 0, free: true, fx: (s, c) => { if (s.pact) { H.rel(s, s.pact, 2); s.pactStrain = Math.max(0, (s.pactStrain || 0) - 1); } } },
+    ],
+  },
+  minister_scandal: {
+    icon: '📰', nations: [], w: 0, timer: 2,
+    title: (n, c) => `Scandal at ${c && c.role ? ROLES[c.role].label : 'the Cabinet'}`,
+    text: (n, c, s) => { const m = s.cabinet[c.role]; return `${m ? m.name : 'A minister'}, your ${ROLES[c.role].label} minister, is in the headlines for the wrong reasons. The opposition is circling.`; },
+    erupt: (s, c) => { H.g(s, 'stab', -5); if (s.cabinet[c.role]) s.cabinet[c.role].loyalty = Math.max(0, s.cabinet[c.role].loyalty - 15); return 'The story runs for a week. Stability −5.'; },
+    options: [
+      { label: 'Stand by them', sub: 'Loyalty +20, Stability −3', ap: 1, cost: 0, fx: (s, c) => { H.g(s, 'stab', -3); const m = s.cabinet[c.role]; if (m) m.loyalty = Math.min(100, m.loyalty + 20); } },
+      { label: 'Sack and replace', sub: 'A fresh face, Stability −1', ap: 1, cost: 2, fx: (s, c) => { H.g(s, 'stab', -1); s.cabinet[c.role] = newMinister(s.rand, 2 + Math.floor(s.rand() * 3)); } },
+      { label: 'A quiet word', sub: 'A gamble. Win: it blows over. Lose: it gets worse', ap: 1, cost: 0, brink: true,
+        pfn: (s, c) => 45 + (s.cabinet[c.role] ? s.cabinet[c.role].loyalty * 0.2 : 0),
+        w: 'The story dies quietly.', l: 'Someone leaks the quiet word.',
+        win: (s, c) => { const m = s.cabinet[c.role]; if (m) m.loyalty = Math.min(100, m.loyalty + 5); },
+        lose: (s, c) => { H.g(s, 'stab', -5); const m = s.cabinet[c.role]; if (m) m.loyalty = Math.max(0, m.loyalty - 10); } },
     ],
   },
   mediate: {

@@ -1,8 +1,12 @@
 // Pure game logic. No DOM. Mutates a state object `s`; the UI renders from it.
-import { NATIONS, POWERS, ACTIONS, CRISES, H, clamp, leaderBonus, LEADERS, FEUDS } from './data.js';
+import { NATIONS, POWERS, ACTIONS, CRISES, H, clamp, leaderBonus, LEADERS, FEUDS, regimeChange, PATRON, breakPact } from './data.js';
+import { newCabinet, newMinister, eskill, ROLE_KEYS, ROLES } from './cabinet.js';
+import { reactFor } from './voices.js';
 import { UNITS, unitById, START_FORCES, START_PURCH, POLITICS, SUPPLIERS, powers, syncDet, upkeep, effMe, effFoe, foeFactor } from './forces.js';
 
-export const MAX_TURN = 20;
+export const MAX_TURN = 20; // quarters in one term
+export const MAX_TERMS = 3;
+export const maxT = (s) => s.maxTurn || MAX_TURN;
 export const AP_PER_TURN = 4;
 export const START_YEAR = 2027;
 export const MAX_WAR_ROUNDS = 6;
@@ -30,6 +34,12 @@ export function restore(json) {
   // saves from older versions
   if (!s.feuds) { s.feuds = {}; for (const [k, f] of Object.entries(FEUDS)) s.feuds[k] = { t: f.base, war: 0 }; }
   if (!s.pendingMediate) s.pendingMediate = [];
+  if (!s.pendingMeddle) s.pendingMeddle = [];
+  if (!s.cabinet) { s.cabinet = {}; for (const r of ROLE_KEYS) s.cabinet[r] = { name: 'Minister', skill: 3, trait: 'loyalist', loyalty: 65 }; }
+  if (s.pact === undefined) { s.pact = null; s.pactStrain = 0; }
+  if (!s.maxTurn) s.maxTurn = MAX_TURN;
+  if (!s.term) s.term = 1;
+  if (!s.nuke) s.nuke = { prog: 0, power: false, device: false, exposed: false, halted: false };
   for (const [c, n] of Object.entries(s.nations)) { if (n.unrest == null) n.unrest = NATIONS[c].unrest; if (n.covert == null) n.covert = 0; }
   return s;
 }
@@ -79,12 +89,14 @@ export function newGame(seed = Math.floor(Math.random() * 2147483646) + 1) {
     nations: {}, crises: [], cd: {}, shield: 0, uid: 1, lastDet: 40,
     stats: { resolved: 0, failed: 0, erupted: 0, warsWon: 0, warsLost: 0 }, over: null,
     forces: { ...START_FORCES }, purch: { ...START_PURCH }, orders: [], ordersThisTurn: 0,
+    term: 1, maxTurn: MAX_TURN, nuke: { prog: 0, power: false, device: false, exposed: false, halted: false },
     arms: 0, posture: 0, war: null, pendingWar: null, supplyHits: 0, log: [], hist: [],
   };
   for (const [c, n] of Object.entries(NATIONS)) {
     s.nations[c] = { rel: clamp(n.rel + jit()), heat: clamp(n.heat + jit()), intent: 'distracted', scout: 0, mil: { ...n.mil }, leader: { ...LEADERS[c] }, unrest: n.unrest, covert: 0 };
   }
-  s.feuds = {}; s.pendingMediate = [];
+  s.feuds = {}; s.pendingMediate = []; s.pendingMeddle = [];
+  s.cabinet = newCabinet(rand); s.pact = null; s.pactStrain = 0;
   for (const [k, f] of Object.entries(FEUDS)) s.feuds[k] = { t: clamp(f.base + jit()), war: 0 };
   s.baseUpkeep = upkeep(s);
   syncDet(s);
@@ -94,16 +106,16 @@ export function newGame(seed = Math.floor(Math.random() * 2147483646) + 1) {
   return s;
 }
 
-export const nm = (code) => (NATIONS[code] || POWERS[code]).name;
+export const nm = (code) => (code === 'SG' ? 'Singapore' : (NATIONS[code] || POWERS[code]).name);
 
 export function income(s) {
   const rels = Object.values(s.nations).map((n) => n.rel);
   const avg = rels.reduce((a, b) => a + b, 0) / rels.length;
-  return Math.round(5 + s.g.hub * 0.12 + (avg - 50) * 0.12 + (s.powers.CN.rel > 60 ? 2 : 0) - (upkeep(s) - s.baseUpkeep));
+  return Math.round(5 + s.g.hub * 0.12 + (avg - 50) * 0.12 + (s.powers.CN.rel > 60 ? 2 : 0) + (s.nuke && s.nuke.power ? 1 : 0) + Math.round(eskill(s, 'fin') * 0.4) + (s.pact === 'CN' ? 4 : 0) - (upkeep(s) - s.baseUpkeep));
 }
 
 export function turnLabel(s) {
-  const t = Math.min(s.turn, MAX_TURN) - 1;
+  const t = Math.min(s.turn, maxT(s)) - 1;
   return `${START_YEAR + Math.floor(t / 4)} Q${(t % 4) + 1}`;
 }
 
@@ -121,6 +133,8 @@ export function actionState(s, a, target) {
   return { ok: true, reason: '' };
 }
 
+const leaderOf2 = (s, c) => (s.nations[c] && s.nations[c].leader) || LEADERS[c];
+
 export function doAction(s, id, target) {
   const a = ACTIONS.find((x) => x.id === id);
   const st = actionState(s, a, target);
@@ -131,28 +145,38 @@ export function doAction(s, id, target) {
   if (typeof r === 'string') note = r;
   else if (r && r.note) { note = r.note; if (r.log) logEv(s, r.log.text, r.log.w, r.log.tone); }
   else note = leaderBonus(s, id, target);
+  const fe = Math.round(eskill(s, 'for') * 0.5);
+  if (fe && (id === 'visit' || id === 'trade') && target) H.rel(s, target, fe);
+  if (id === 'trade' && eskill(s, 'tni')) H.g(s, 'hub', Math.round(eskill(s, 'tni') * 0.5));
+  let quote = '';
+  const L = target ? leaderOf2(s, target) : null;
+  if (L) {
+    const kind = id === 'signal' ? 'signal' : (id === 'visit' || id === 'trade') ? id : /Exposed/.test(note) ? 'covert' : '';
+    if (kind) quote = reactFor(s, target, L, kind);
+  }
   if (a.cd) s.cd[id] = a.cd;
   flushWar(s);
   checkOver(s);
-  return { ok: true, note };
+  return { ok: true, note, quote, speaker: L ? L.name : '' };
 }
 
 // ---------- crises ----------
 
 export function brinkChance(s, c, o) {
-  if (o.pfn) return clamp(Math.round(o.pfn(s, c)), 10, 90);
+  const fb = eskill(s, 'for') * 1.5; // a good foreign minister improves every gamble
+  if (o.pfn) return clamp(Math.round(o.pfn(s, c) + fb), 10, 90);
   const n = s.nations[c.nation];
   if (!n) {
-    const p = s.powers[c.nation];
-    return clamp(Math.round(45 + (p.rel - 50) * 0.45 + (s.g.det - 50) * 0.1), 10, 90);
+    const p = s.powers[c.nation] || { rel: 50 };
+    return clamp(Math.round(45 + (p.rel - 50) * 0.45 + (s.g.det - 50) * 0.1 + fb), 10, 90);
   }
   const im = { friendly: 10, opportunist: -4, hawkish: -14, distracted: 6 }[n.intent];
-  return clamp(Math.round(50 + (s.g.det - 50) * 0.35 + (n.rel - 50) * 0.25 - (n.heat - 40) * 0.25 + im), 10, 90);
+  return clamp(Math.round(50 + (s.g.det - 50) * 0.35 + (n.rel - 50) * 0.25 - (n.heat - 40) * 0.25 + im + fb), 10, 90);
 }
 
 export function crisisOptions(s, c) {
   const t = CRISES[c.tpl];
-  const known = !!s.powers[c.nation] || s.nations[c.nation].scout > 0;
+  const known = !!s.powers[c.nation] || !s.nations[c.nation] || s.nations[c.nation].scout > 0;
   return t.options.map((o, i) => {
     let ok = true, reason = '';
     if (s.war) { ok = false; reason = 'At war'; }
@@ -208,12 +232,17 @@ function spawnCrises(s) {
     if (s.crises.length < 6 && !s.crises.some((c) => c.tpl === 'mediate' && c.key === m.key)) out.push(addCrisis(s, 'mediate', m.a, { other: m.b, key: m.key }));
   }
   s.pendingMediate = [];
+  for (const m of (s.pendingMeddle || [])) {
+    const { tpl, nation, ...extra } = m;
+    if (s.crises.length < 7 && !s.crises.some((c) => c.tpl === tpl && c.nation === nation && c.other === extra.other && c.role === extra.role)) out.push(addCrisis(s, tpl, nation, extra));
+  }
+  s.pendingMeddle = [];
   for (const [code, n] of Object.entries(s.nations)) {
     if (n.heat >= 75 && !s.crises.some((c) => c.tpl === 'ultimatum' && c.nation === code)) {
       out.push(addCrisis(s, 'ultimatum', code));
     }
   }
-  let count = 1 + (r() < 0.55 ? 1 : 0) + (s.turn > 5 && r() < 0.4 ? 1 : 0);
+  let count = 1 + (r() < 0.55 + (s.term - 1) * 0.1 ? 1 : 0) + (s.turn > 5 && r() < 0.4 + (s.term - 1) * 0.1 ? 1 : 0);
   if (s.turn === 1) count = Math.max(count, 2);
   for (let k = 0; k < count && s.crises.length < 5; k++) {
     const imb = Math.abs(s.powers.US.rel - s.powers.CN.rel);
@@ -267,7 +296,7 @@ export function checkOver(s) {
 function attackWill(s, code) {
   const e = effFoe(s.nations[code], code), m = effMe(s);
   const sum = (o) => o.land + o.air + o.sea;
-  return clamp(0.9 * sum(e) / Math.max(1, sum(m)), 0.3, 1);
+  return clamp(0.9 * sum(e) / Math.max(1, sum(m)), 0.3, 1) * (s.nuke.device ? 0.3 : 1);
 }
 
 // ---------- the neighbours' own quarrels ----------
@@ -310,6 +339,109 @@ function stepFeuds(s, ev) {
   }
 }
 
+// ---------- Washington and Beijing play the region ----------
+function meddle(s, ev) {
+  if (s.rand() > 0.55 + (s.term - 1) * 0.05) return;
+  const P = s.pact && s.rand() < 0.65 ? (s.pact === 'US' ? 'CN' : 'US') : (s.rand() < 0.5 ? 'US' : 'CN'), pn = POWERS[P].name;
+  const picks = PATRON[P], X = picks[Math.floor(s.rand() * picks.length)], xn = nm(X), n = s.nations[X];
+  const r = s.rand();
+  if (r < 0.4) {
+    for (const d of ['land', 'air', 'sea']) if (n.mil[d] > 0) n.mil[d] += 5;
+    if (X === 'MY' || X === 'ID') H.heat(s, X, 3);
+    ev.push({ kind: 'news', text: `${pn} ships arms to ${xn}. Its forces grow.` });
+    if (['MY', 'ID', 'VN', 'TH'].includes(X) && s.rand() < 0.7 && !s.crises.some((c) => c.tpl === 'gp_buildup' && c.nation === P && c.other === X)) {
+      s.pendingMeddle.push({ tpl: 'gp_buildup', nation: P, other: X });
+    }
+  } else if (r < 0.7) {
+    H.rel(s, X, -3);
+    if (P === 'CN' && ['MY', 'VN', 'TH', 'ID'].includes(X)) H.g(s, 'hub', -1);
+    ev.push({ kind: 'news', text: `${pn} signs a big infrastructure and loans package with ${xn}. It drifts from Singapore.${P === 'CN' && ['MY', 'VN', 'TH', 'ID'].includes(X) ? ' (Hub −1)' : ''}` });
+  } else {
+    n.unrest = clamp((n.unrest || 0) + 12); H.heat(s, X, -3);
+    ev.push({ kind: 'news', text: `Whispers of foreign money behind protests in ${xn}. ${pn} denies it.` });
+  }
+  // and sometimes they work on Singapore directly
+  const imb = Math.abs(s.powers.US.rel - s.powers.CN.rel);
+  const target = imb > 25 ? (s.powers.US.rel > s.powers.CN.rel ? 'CN' : 'US') : P; // the neglected giant pushes back
+  if (s.rand() < (imb > 25 ? 0.4 : 0.15) && !s.crises.some((c) => c.tpl === 'gp_influence')) s.pendingMeddle.push({ tpl: 'gp_influence', nation: target });
+}
+
+// ---------- the nuclear programme: noticed, then reacted to ----------
+function nukeStep(s, ev) {
+  const k = s.nuke;
+  if (k.prog <= 0 || k.device) return;
+  if (!k.exposed && k.prog >= 20 && s.rand() < 0.04 + k.prog / 600) {
+    k.exposed = true;
+    const hot = Object.entries(s.nations).filter(([c]) => ['MY', 'ID', 'VN', 'TH'].includes(c)).sort((a, b) => b[1].heat - a[1].heat)[0][0];
+    if (!s.crises.some((c) => c.tpl === 'nuke_probe')) s.pendingMeddle.push({ tpl: 'nuke_probe', nation: hot });
+    ev.push({ kind: 'news', text: 'LEAK: foreign intelligence suspects a military track inside Singapore\'s nuclear programme.' });
+  }
+  if (k.exposed && !k.halted) {
+    for (const [c, n] of Object.entries(s.nations)) H.heat(s, c, n.intent === 'hawkish' || n.intent === 'opportunist' ? 2 : 1);
+    H.g(s, 'hub', -1);
+  }
+}
+
+// ---------- extra terms ----------
+export function extendTerm(s) {
+  if (!s.over || !s.over.extend) return [];
+  s.over = null;
+  s.term++;
+  s.maxTurn = maxT(s) + MAX_TURN;
+  s.money += 20; // a fresh mandate and a budget to match
+  H.g(s, 'stab', 8);
+  s.war = null;
+  s.ap = AP_PER_TURN; s.ordersThisTurn = 0; s.lastDet = s.g.det;
+  logEv(s, `Re-elected for term ${s.term}.`, 30, 'good');
+  const created = spawnCrises(s);
+  return created;
+}
+
+// ---------- partners, rivals, ministers ----------
+function pactStep(s) {
+  if (!s.pact) return;
+  const P = s.pact, R = P === 'US' ? 'CN' : 'US';
+  const has = (tpl) => s.crises.some((c) => c.tpl === tpl) || s.pendingMeddle.some((m) => m.tpl === tpl);
+  if (s.rand() < 0.3 && !has('gp_ally_call')) s.pendingMeddle.push({ tpl: 'gp_ally_call', nation: P });
+  if (s.rand() < 0.22 && !has('gp_coerce')) s.pendingMeddle.push({ tpl: 'gp_coerce', nation: R });
+  if (s.rand() < 0.1 && !has('gp_carrot')) s.pendingMeddle.push({ tpl: 'gp_carrot', nation: R });
+  if ((s.turn % 4) === 0 && s.pactStrain > 0) s.pactStrain--;
+}
+function cabinetStep(s, ev) {
+  for (const r of ROLE_KEYS) {
+    const m = s.cabinet[r];
+    let d = Math.round(s.rand() * 4 - 2); // restless
+    if (s.g.stab >= 60) d += 1; else if (s.g.stab < 40) d -= 3;
+    if (m.trait === 'loyalist') d = Math.max(d, 0); // loyalists only drift up
+    if (m.trait === 'maverick') d += Math.round(s.rand() * 8 - 4);
+    m.loyalty = clamp(m.loyalty + d);
+    const scandalP = m.trait === 'maverick' ? 0.06 : m.trait === 'showman' ? 0.035 : 0.01;
+    if (s.rand() < scandalP && !s.crises.some((c) => c.tpl === 'minister_scandal') && !s.pendingMeddle.some((x) => x.tpl === 'minister_scandal')) s.pendingMeddle.push({ tpl: 'minister_scandal', nation: 'SG', role: r });
+    if (m.loyalty <= 12 && s.rand() < 0.3) {
+      ev.push({ kind: 'erupt', text: `${m.name} resigns as ${ROLES[r].label} Minister. An acting minister takes over. Stability −2.` });
+      logEv(s, `${ROLES[r].label} Minister ${m.name} resigned.`, 40);
+      H.g(s, 'stab', -2);
+      s.cabinet[r] = { name: 'Acting Minister', skill: 1, trait: 'loyalist', loyalty: 50 };
+    }
+  }
+}
+export function ministerPraise(s, role) {
+  if (s.war) return { ok: false, reason: 'At war' };
+  if (s.ap < 1) return { ok: false, reason: 'No action points' };
+  s.ap--; const m = s.cabinet[role]; m.loyalty = clamp(m.loyalty + 15);
+  return { ok: true, note: `${m.name} is back on side: loyalty ${Math.round(m.loyalty)}` };
+}
+export function ministerReplace(s, role) {
+  if (s.war) return { ok: false, reason: 'At war' };
+  if (s.ap < 1) return { ok: false, reason: 'No action points' };
+  if (s.money < 3) return { ok: false, reason: 'Not enough funds' };
+  if ((s.cd['m_' + role] || 0) > 0) return { ok: false, reason: `Ready in ${s.cd['m_' + role]} turns` };
+  s.ap--; s.money -= 3; s.cd['m_' + role] = 3;
+  const old = s.cabinet[role].name;
+  s.cabinet[role] = newMinister(s.rand, 1 + Math.floor(s.rand() * 5)); // anywhere from raw to brilliant
+  return { ok: true, note: `${old} out, ${s.cabinet[role].name} in (${s.cabinet[role].skill}★)` };
+}
+
 export function endTurn(s) {
   if (s.war) return { events: [], created: [], over: null };
   const ev = [];
@@ -340,12 +472,18 @@ export function endTurn(s) {
   s.arms += US > 65 ? 0.7 : 1.1;
   s.posture = Math.trunc(s.posture * 0.7);
   syncDet(s);
-  H.g(s, 'res', -4);
+  H.g(s, 'res', (s.g.res > 40 ? -3 : -2) + (s.nuke.power ? 1 : 0)); // a nuclear plant slows the slide
   H.g(s, 'hub', CN > 65 ? -1 : -2);
   if (s.g.stab > 70) H.g(s, 'stab', -1);
+  // the cabinet at work
+  { const th = Math.round(eskill(s, 'tni') * 0.2); if (th) H.g(s, 'hub', th);
+    const hh = Math.round(eskill(s, 'home') * 0.2); if (hh && s.g.stab < 60) H.g(s, 'stab', hh);
+    for (const r of ROLE_KEYS) { const m = s.cabinet[r]; if (m.trait === 'showman' && m.loyalty >= 50 && s.g.stab < 80) H.g(s, 'stab', 1); } }
+  if (s.pact === 'CN') H.g(s, 'hub', 1);
+  if (s.pact) { const R = s.pact === 'US' ? 'CN' : 'US'; s.powers[R].rel = Math.max(15, s.powers[R].rel - 1); }
   
-  if (Math.abs(US - CN) > 35) { H.g(s, 'stab', -1); ev.push({ kind: 'info', text: 'Leaning too far toward one giant strains the home front (Stability −1).' }); }
-  for (const p of Object.values(s.powers)) { if (p.rel > 60) p.rel -= 1; else if (p.rel < 40) p.rel += 1; }
+  if (!s.pact && Math.abs(US - CN) > 35) { H.g(s, 'stab', -1); ev.push({ kind: 'info', text: 'Leaning too far toward one giant strains the home front (Stability −1).' }); }
+  for (const [pc, p] of Object.entries(s.powers)) { if (p.rel > 60 && pc !== s.pact) p.rel -= 1; else if (p.rel < 40) p.rel += 1; }
 
   // 3) neighbours react
   for (const [code, n] of Object.entries(s.nations)) {
@@ -357,7 +495,7 @@ export function endTurn(s) {
     if (hos && detRise >= 8) dh += 3;
     if (s.g.hub > 70) dh -= 1;
     n.heat = clamp(n.heat + dh);
-    const grow = { friendly: 0.2, opportunist: 0.6, hawkish: 1.0, distracted: 0.3 }[n.intent] * 1.6 * (0.7 + s.rand() * 0.6);
+    const grow = { friendly: 0.2, opportunist: 0.6, hawkish: 1.0, distracted: 0.3 }[n.intent] * 1.6 * (1 + (s.term - 1) * 0.25) * (0.7 + s.rand() * 0.6);
     for (const d of ['land', 'air', 'sea']) if (n.mil[d] > 0) n.mil[d] += grow;
     if (n.heat >= 96 && hos && !s.war && !s.pendingWar && s.rand() < attackWill(s, code)) H.war(s, code, { aggressor: false, start: -15, reason: 'attack' });
     const home = NATIONS[code].home;
@@ -366,6 +504,10 @@ export function endTurn(s) {
     const ub = NATIONS[code].unrest, ud = ub - (n.unrest || 0);
     if (Math.abs(ud) >= 3) n.unrest = clamp((n.unrest || 0) + Math.sign(ud) * Math.ceil(Math.abs(ud) * 0.1));
     if (n.unrest > 55) H.heat(s, code, -2);
+    if (n.unrest >= 78 && s.rand() < 0.35) {
+      const r = regimeChange(s, code);
+      ev.push({ kind: 'news', text: `COUP in ${nm(code)}: ${r.note}` }); logEv(s, r.log.text, 60, r.log.tone);
+    }
     if (n.covert > 0 && s.rand() < 0.04 * n.covert) {
       H.rel(s, code, -12); H.heat(s, code, 10); n.covert = Math.max(0, n.covert - 1);
       ev.push({ kind: 'erupt', text: `${nm(code)} uncovers Singapore's hand behind its opposition. Trust −12.` });
@@ -376,6 +518,10 @@ export function endTurn(s) {
   }
 
   stepFeuds(s, ev);
+  meddle(s, ev);
+  pactStep(s);
+  cabinetStep(s, ev);
+  nukeStep(s, ev);
 
   // 4) money
   const inc = income(s);
@@ -391,8 +537,16 @@ export function endTurn(s) {
 
   // 6) next turn
   s.turn++;
-  if (s.turn > MAX_TURN) {
-    s.over = { result: 'win', title: 'You Held the Line', text: 'Five years. The lights are on, the ports are busy, and the flag still flies.', score: score(s, true) };
+  if (s.turn > maxT(s)) {
+    const rels = Object.values(s.nations).map((n) => n.rel), avg = rels.reduce((a, b) => a + b, 0) / rels.length;
+    const share = Math.round(clamp(36 + s.g.stab * 0.42 + (s.g.hub - 50) * 0.12 + (avg - 50) * 0.08 + s.g.res * 0.04, 20, 85));
+    if (share >= 50) {
+      const more = s.term < MAX_TERMS;
+      s.over = { result: 'win', extend: more, share, title: s.term > 1 ? `Term ${s.term} Complete` : 'You Held the Line',
+        text: `Five years. The lights are on, the ports are busy, and the flag still flies. The voters give you ${share}% and ask you to stay.${more ? '' : ' That is three terms, and the end of an era.'}`, score: score(s, true) };
+    } else {
+      s.over = { result: 'lose', share, title: 'Voted Out', text: `You held the line, but the voters did not renew you (${share}%). Someone else inherits the strait.`, score: score(s, true) };
+    }
     return { events: ev, created: [], over: s.over };
   }
   for (const k of Object.keys(s.cd)) s.cd[k] = Math.max(0, s.cd[k] - 1);
@@ -424,6 +578,8 @@ export function score(s, survived = true) {
     ['Balanced between giants', bal],
     ['Wars won', s.stats.warsWon * 12],
     ['Wars lost', -s.stats.warsLost * 12],
+    ['Extra terms', (s.term - 1) * 60],
+    ['Strategic deterrent', s.nuke && s.nuke.device ? 20 : 0],
   ];
   const total = parts.reduce((a, [, v]) => a + v, 0);
   let rank = 'Fallen';
@@ -454,15 +610,18 @@ export function diff(a, b) {
 
 const NEED_HISTORY = { 1: 0, 2: 1, 3: 3 };
 
+export const unitCost = (s, u) => Math.round(u.cost * (s.pact && u.sup === s.pact && s.pact === 'US' ? 0.85 : 1));
+
 export function unitState(s, u) {
   if (s.war) return { ok: false, reason: 'At war' };
   if (s.ordersThisTurn >= ORDERS_PER_TURN) return { ok: false, reason: `${ORDERS_PER_TURN} orders per turn` };
-  if (u.cost > s.money) return { ok: false, reason: 'Not enough funds' };
+  if (unitCost(s, u) > s.money) return { ok: false, reason: 'Not enough funds' };
   const need = NEED_HISTORY[u.tier];
-  if (u.sup !== 'SG' && (s.purch[u.sup] || 0) < need) {
+  const ally = s.pact && u.sup === s.pact; // a partner opens its shelves
+  if (!ally && u.sup !== 'SG' && (s.purch[u.sup] || 0) < need) {
     return { ok: false, reason: `Needs ${need} earlier ${SUPPLIERS[u.sup].short} purchase${need > 1 ? 's' : ''}` };
   }
-  if ((u.sup === 'US' || u.sup === 'CN') && u.tier > 1) {
+  if (!ally && (u.sup === 'US' || u.sup === 'CN') && u.tier > 1) {
     const trust = u.tier === 2 ? 55 : 65;
     if (s.powers[u.sup].rel < trust) return { ok: false, reason: `Needs ${POWERS[u.sup].name} trust ${trust}+` };
   }
@@ -473,7 +632,7 @@ export function buyUnit(s, id) {
   const u = unitById[id];
   const st = unitState(s, u);
   if (!st.ok) return st;
-  s.money -= u.cost;
+  s.money -= unitCost(s, u);
   s.ordersThisTurn++;
   s.orders.push({ uid: s.uid++, unit: id, turns: u.delay });
   s.purch[u.sup] = (s.purch[u.sup] || 0) + 1;

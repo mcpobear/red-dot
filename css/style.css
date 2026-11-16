@@ -251,3 +251,12 @@ table.mil td.over { color: var(--red); } table.mil tr.me td { color: var(--teal)
 
 #target { max-height: 40%; overflow-y: auto; }
 .leader .t-sub.q { font-size: 12px; }
+
+.dyn { color: var(--teal); font: 700 11px var(--mono); letter-spacing: .04em; }
+
+/* v0.8 cabinet, quips, partnership */
+.say{font-style:italic;color:var(--ink,#e8eef7);opacity:.9;margin-top:2px}
+.dsp.ally{background:rgba(80,200,140,.18);color:#7fe0ad}
+.min{background:rgba(255,255,255,.04);border-radius:10px;padding:8px 10px;margin:6px 0}
+.min .mh{display:flex;justify-content:space-between;align-items:center}
+.btn.sm{padding:6px 8px;font-size:12px}
